@@ -43,6 +43,9 @@ public sealed class MonitorScanResult
     public string? Error { get; set; }
     public List<MonitorInfo> Monitors { get; } = new();
 
+    /// <summary>合盖状态：由 QueryDisplayConfig 判断内屏是否物理“可用”推断（区分开盖/关盖）。</summary>
+    public LidState Lid { get; set; } = LidState.Unknown;
+
     public bool HasInternal => Monitors.Any(m => m.Kind == MonitorKind.Internal);
     public bool HasExternal => Monitors.Any(m => m.Kind == MonitorKind.External);
 
@@ -135,6 +138,17 @@ public static class DisplayDetector
                     }
                 }
             }
+
+            // 合盖状态：用 QueryDisplayConfig 判断内屏是否物理“可用”（区分“开盖但未激活”与“关盖断开”）
+            try
+            {
+                var lidTargets = DisplayTopology.EnumerateTargets(onlyActivePaths: false);
+                result.Lid = DisplayTopology.DetectLidState(lidTargets);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"读取合盖状态失败：{ex.Message}");
+            }
         }
         catch (Exception ex)
         {
@@ -186,9 +200,9 @@ public static class StateRules
 {
     public static string Describe(ScreenState s) => s switch
     {
-        ScreenState.InternalOnly => "仅笔记本内屏（开盖单屏）",
-        ScreenState.ExternalOnly => "仅外接屏（推断合盖）",
-        ScreenState.Extended => "双屏扩展（内屏+外接同亮）",
+        ScreenState.InternalOnly => "仅笔记本内屏",
+        ScreenState.ExternalOnly => "仅外接屏",
+        ScreenState.Extended => "双屏扩展",
         _ => "未知 / 安全模式",
     };
 
@@ -216,5 +230,13 @@ public static class StateRules
         2 => "合盖休眠",
         3 => "合盖关机",
         _ => $"未知({value})",
+    };
+
+    /// <summary>合盖状态的可读文本（来自 QueryDisplayConfig 判断）。</summary>
+    public static string LidText(LidState lid) => lid switch
+    {
+        LidState.Open => "打开",
+        LidState.Closed => "闭合",
+        _ => "未知",
     };
 }

@@ -7,12 +7,50 @@ using AutoDisplayPower.Utils;
 namespace AutoDisplayPower;
 
 /// <summary>
-/// 只读自检模式：AutoDisplayPower.exe --check [--selftest-power]
-/// 打印检测到的显示器、推断状态与电源策略，不修改任何设置。
-/// 报告同时写入 %LOCALAPPDATA%\AutoDisplayPower\check-report.txt。
+/// 只读自检模式：
+///   --check               打印检测到的显示器、推断状态与电源策略
+///   --check --selftest-power  额外以当前值原样回写，验证写权限
+///   --topology            打印 QueryDisplayConfig 全部显示目标（调试开合检测）
 /// </summary>
 public static class CheckMode
 {
+    /// <summary>调试：打印显示拓扑，验证内屏“物理可用”能否区分开/合盖。</summary>
+    public static void DumpTopology()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("== DisplayTopology (QDC_ALL_PATHS) ==");
+        sb.AppendLine(DisplayTopology.Diagnostic());
+        var targets = DisplayTopology.EnumerateTargets(onlyActivePaths: false);
+        sb.AppendLine($"目标数量: {targets.Count}");
+        foreach (var t in targets)
+            sb.AppendLine($"  {t}");
+
+        var activeTargets = DisplayTopology.EnumerateTargets(onlyActivePaths: true);
+        sb.AppendLine($"仅活动目标数量: {activeTargets.Count}");
+        foreach (var t in activeTargets)
+            sb.AppendLine($"  ACTIVE=>{t}");
+
+        var lid = DisplayTopology.DetectLidState(targets);
+        sb.AppendLine($"[推断合盖] {lid}");
+
+        sb.AppendLine();
+        sb.AppendLine("== EnumDisplayDevices 所有监视器(含未激活) ==");
+        foreach (var (probe, active) in Win32Display.EnumerateAllMonitors())
+        {
+            string model = EdidHelper.ResolveModelName(probe.Id);
+            sb.AppendLine($"  [{(active ? "ACTIVE" : "inact")}] {model}  <{probe.Id}>");
+        }
+        Console.WriteLine(sb.ToString());
+
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoDisplayPower");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "topology-report.txt"), sb.ToString(), new UTF8Encoding(false));
+        }
+        catch { }
+    }
+
     public static void Run(bool selfTestPower)
     {
         var sb = new StringBuilder();
@@ -37,7 +75,7 @@ public static class CheckMode
         }
 
         sb.AppendLine($"[屏幕状态] {StateRules.Describe(snap.State)}");
-        sb.AppendLine($"[推断盖子] {StateRules.InferLidText(snap.State)}");
+        sb.AppendLine($"[推断盖子] {StateRules.LidText(snap.Lid)}");
         var (lid, policyText) = StateRules.ExpectedPolicy(snap.State);
         sb.AppendLine($"[期望策略] {policyText}  (LIDACTION = {(lid.HasValue ? lid.Value.ToString() : "不变")})");
 

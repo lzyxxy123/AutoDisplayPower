@@ -8,12 +8,16 @@
 
 ## 核心逻辑
 
-| 检测到的屏幕集合 | 推断物理状态 | 合盖操作（AC/DC 同时设置） |
-|---|---|---|
-| 仅 KG257S PLUS（外接） | 合盖（内屏已断开） | 不操作 (0) |
-| 仅 ATNA40HQ01-0（内屏） | 开盖单屏 | 睡眠 S3 (1) |
-| KG257S PLUS + ATNA40HQ01-0 | 开盖扩展双屏 | 不操作 (0) |
-| 其他（空 / 未知型号） | 未知（安全模式） | 保持现状，仅记日志 |
+| 检测到的屏幕集合 | 合盖操作（AC/DC 同时设置） |
+|---|---|
+| 仅 KG257S PLUS（外接） | 不操作 (0) |
+| 仅 ATNA40HQ01-0（内屏） | 睡眠 S3 (1) |
+| KG257S PLUS + ATNA40HQ01-0 | 不操作 (0) |
+| 其他（空 / 未知型号） | 保持现状，仅记日志 |
+
+**盖子开合状态**另由 `QueryDisplayConfig` 判定：内屏目标"物理可用(available)"→开盖；"已断开"→关盖。
+该 API 能区分"内屏物理断开（关盖）"与"内屏物理连接但未激活（开盖+仅外接）"，因此
+即使程序强制"仅外接"（切断内屏显示），仍能正确显示开/合盖；受限会话读取失败时保守显示"未知"。
 
 显示模式自动切换（插拔时触发，会覆盖手动设置的扩展/复制）：
 
@@ -21,7 +25,7 @@
 - 拔掉外接屏 → `DisplaySwitch.exe /internal`（仅笔记本）
 
 程序以普通权限运行（无 UAC）：修改当前用户活动电源方案的合盖值**无需提权**；
-开机自启动通过**任务计划程序**（At Logon，当前用户）实现，不写注册表 Run 键。
+开机自启动优先通过**任务计划程序**（At Logon，当前用户）实现，若受限则回退写入 **HKCU Run 键**保证生效。
 
 ## 项目结构
 
@@ -35,9 +39,10 @@ AutoDisplayPower/
 │   ├── DisplayDetector.cs      # EDID 型号识别（读取 0xFC 描述符）+ 状态机规则
 │   ├── PowerManager.cs         # powercfg 修改 LIDACTION（AC/DC）
 │   ├── DisplaySwitcher.cs      # DisplaySwitch.exe 切换显示模式
-│   └── StartupManager.cs       # schtasks 管理开机自启动
+│   └── StartupManager.cs       # 开机自启动：任务计划程序 + Run 键兜底
 ├── Utils/
 │   ├── Win32Display.cs         # P/Invoke：EnumDisplayDevices 枚举“活动”显示器
+│   ├── DisplayTopology.cs      # P/Invoke：QueryDisplayConfig 判定开/合盖
 │   ├── EdidHelper.cs           # 读取注册表 EDID，解析真实型号名(0xFC 描述符)
 │   ├── Logger.cs               # %LOCALAPPDATA%\AutoDisplayPower\app.log
 │   ├── AppSettings.cs          # HKCU\Software\AutoDisplayPower
@@ -83,6 +88,9 @@ dotnet publish .\AutoDisplayPower.csproj -c Release -p:PublishSingleFile=true -o
   若某台显示器供电关闭导致 EDID 不可读，会被当作“未知/已拔出”处理，属系统行为限制。
 - **指纹匹配说明**：程序按 EDID 实际型号名匹配。外接屏 EDID 名记为 `KG257S PLUS`（字母 S），
   与规格书文字 `KG2575 PLUS`（数字 5）不同，程序对两者均兼容；内屏为 `ATNA40HQ01-0`。
+- **盖子开合**：依赖 `QueryDisplayConfig` 判断内屏“物理可用”。在受限/虚拟显示会话（如远程桌面、
+  某些沙箱）该 API 可能返回 `ERROR_INVALID_PARAMETER`，此时保守显示“未知”，而非错误的“闭合”；
+  在普通 Windows 交互登录会话中可正确区分开/合。
 - 合盖瞬间的睡眠触发由系统完成：本程序在**状态变化后**立即改写策略，若机器长时间处于
   “仅内屏→合盖睡眠”策略下直接合盖，会按既有策略立即睡眠（符合预期）；接外接后再合盖则不会睡眠。
 - 合盖状态下拔掉外接屏不会立刻睡眠（需要再次合盖或系统超时），此为规格书状态机的自然结果。

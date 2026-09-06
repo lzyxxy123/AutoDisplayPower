@@ -1,20 +1,24 @@
 using System;
 using System.Diagnostics;
 using AutoDisplayPower.Utils;
+using Microsoft.Win32;
 
 namespace AutoDisplayPower.Services;
 
 /// <summary>
-/// 开机自启动管理：使用“任务计划程序”而非注册表 Run 键。
-/// 以当前登录用户身份创建 At Logon 触发器任务，全程无 UAC 弹窗。
+/// 开机自启动管理：
+/// 优先使用“任务计划程序”（At Logon，当前用户，无 UAC）；
+/// 若任务计划程序受系统限制无法创建（如受限会话），自动回退写入 HKCU Run 键，保证自启动可用。
 /// </summary>
 public static class StartupManager
 {
     public const string TaskName = "AutoDisplayPower";
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValueName = "AutoDisplayPower";
 
     public static bool Enable(string exePath)
     {
-        // 不加 /RU，任务以当前登录用户身份运行；/F 覆盖同名旧任务（如 EXE 路径变化时自动重建）
+        // 1) 任务计划程序
         var r = Run("/Create", "/F", "/TN", TaskName, "/TR", exePath, "/SC", "ONLOGON");
         if (r.ExitCode == 0)
         {
@@ -22,31 +26,78 @@ public static class StartupManager
             return true;
         }
 
-        Logger.Warn($"创建开机自启动任务失败（退出码 {r.ExitCode}）：{r.ErrorTail}");
-        return false;
+        Logger.Warn($"任务计划程序创建失败（退出码 {r.ExitCode}）：{r.ErrorTail}，回退注册表 Run 键。");
+
+        // 2) 回退：HKCU Run 键（无需管理员、不触发 UAC）
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
+            key?.SetValue(RunValueName, "\"" + exePath + "\"");
+            Logger.Info($"已通过 HKCU Run 键启用开机自启动（回退方案）。");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"注册表 Run 键回退失败", ex);
+            return false;
+        }
     }
 
     public static bool Disable()
     {
         var r = Run("/Delete", "/TN", TaskName, "/F");
-        if (r.ExitCode == 0)
+        bool taskOk = r.ExitCode == 0;
+        bool runKeyOk = true;
+        try
         {
-            Logger.Info($"已删除开机自启动计划任务：{TaskName}");
-            return true;
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+            key?.DeleteValue(RunValueName, throwOnMissingValue: false);
+        }
+        catch
+        {
+            runKeyOk = false;
         }
 
-        Logger.Warn($"删除开机自启动任务失败（退出码 {r.ExitCode}）：{r.ErrorTail}");
-        return false;
+        bool ok = taskOk || runKeyOk;
+        if (ok) Logger.Info("已关闭开机自启动（任务计划程序与 Run 键均已清理）。");
+        return ok;
     }
 
-    public static bool IsEnabled() => Run("/Query", "/TN", TaskName).ExitCode == 0;
+    public static bool IsEnabled() => Run("/Query", "/TN", TaskName).ExitCode == 0 || RunKeyExists();
 
     /// <summary>任务当前指向的 EXE 是否与本程序路径一致（用于路径迁移后自动重建）。</summary>
     public static bool PointsTo(string exePath)
     {
-        var r = Run("/Query", "/TN", TaskName, "/XML");
-        return r.ExitCode == 0
-               && (r.Output ?? string.Empty).IndexOf(exePath.Trim(), StringComparison.OrdinalIgnoreCase) >= 0;
+        if (Run("/Query", "/TN", TaskName, "/XML").ExitCode == 0
+            && (Run("/Query", "/TN", TaskName, "/XML").Output ?? string.Empty)
+                .IndexOf(exePath.Trim(), StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath);
+            string? v = key?.GetValue(RunValueName) as string;
+            return v is not null && v.IndexOf(exePath.Trim(), StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool RunKeyExists()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath);
+            return key?.GetValue(RunValueName) != null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static (int ExitCode, string Output, string ErrorTail) Run(params string[] args)

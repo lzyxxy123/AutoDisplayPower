@@ -225,7 +225,7 @@ public sealed class MainForm : ApplicationContext
         string screens = snap.Monitors.Count == 0
             ? "未检测到显示器"
             : string.Join("、", snap.Monitors.Select(m => m.ModelName).Distinct());
-        string lid = StateRules.InferLidText(snap.State);
+        string lid = StateRules.LidText(snap.Lid);
         string core = $"{snap.State}|{screens}|{lid}";
         if (core == _lastCore) return;
 
@@ -272,7 +272,7 @@ public sealed class MainForm : ApplicationContext
 
         TryBalloon(
             $"屏幕状态：{StateRules.Describe(snap.State)}\n" +
-            $"推断盖子：{StateRules.InferLidText(snap.State)}\n" +
+            $"推断盖子：{StateRules.LidText(snap.Lid)}\n" +
             $"期望策略：{StateRules.ExpectedPolicy(snap.State).PolicyText}");
     }
 

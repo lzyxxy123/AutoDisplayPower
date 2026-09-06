@@ -23,6 +23,18 @@ public static class Win32Display
     public static IReadOnlyList<DisplayProbe> EnumerateActiveMonitors()
     {
         var list = new List<DisplayProbe>();
+        foreach (var (probe, active) in EnumerateAllMonitors())
+        {
+            if (active) list.Add(probe);
+        }
+
+        return list;
+    }
+
+    /// <summary>枚举所有监视器（含未激活），返回是否活动。用于区分“连接但未激活”与“完全断开”。</summary>
+    public static IReadOnlyList<(DisplayProbe Probe, bool Active)> EnumerateAllMonitors()
+    {
+        var list = new List<(DisplayProbe, bool)>();
         try
         {
             for (uint adapter = 0; ; adapter++)
@@ -35,21 +47,18 @@ public static class Win32Display
                 {
                     var dm = new DISPLAY_DEVICE { cb = (uint)Marshal.SizeOf<DISPLAY_DEVICE>() };
                     if (!EnumDisplayDevices(dd.DeviceName, mon, ref dm, 0)) break;
-                    if ((dm.StateFlags & DISPLAY_DEVICE_ACTIVE) == 0) continue;
                     if (string.IsNullOrEmpty(dm.DeviceID)) continue;
 
-                    list.Add(new DisplayProbe
+                    bool active = (dm.StateFlags & DISPLAY_DEVICE_ACTIVE) != 0;
+                    list.Add((new DisplayProbe
                     {
                         Id = dm.DeviceID.Trim(),
                         Friendly = (dm.DeviceString ?? string.Empty).Trim(),
-                    });
+                    }, active));
                 }
             }
         }
-        catch
-        {
-            // 枚举失败：返回已收集到的结果
-        }
+        catch { /* 返回已收集项 */ }
 
         return list;
     }

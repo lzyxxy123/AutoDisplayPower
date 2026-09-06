@@ -17,6 +17,13 @@ internal static class Program
     {
         bool checkMode = args.Length > 0 && (args[0] == "--check" || args[0] == "-c");
         bool selfTestPower = Array.IndexOf(args, "--selftest-power") >= 0;
+        bool topologyMode = Array.IndexOf(args, "--topology") >= 0;
+
+        if (topologyMode)
+        {
+            CheckMode.DumpTopology();
+            return;
+        }
 
         if (checkMode)
         {
