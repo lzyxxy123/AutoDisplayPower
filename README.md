@@ -32,12 +32,13 @@ AutoDisplayPower/
 ├── MainForm.cs                 # 托盘图标 + 主循环（ApplicationContext）
 ├── CheckMode.cs                # 只读自检模式
 ├── Services/
-│   ├── DisplayDetector.cs      # Win32 枚举活动显示器型号 + 状态机规则
+│   ├── DisplayDetector.cs      # EDID 型号识别（读取 0xFC 描述符）+ 状态机规则
 │   ├── PowerManager.cs         # powercfg 修改 LIDACTION（AC/DC）
 │   ├── DisplaySwitcher.cs      # DisplaySwitch.exe 切换显示模式
 │   └── StartupManager.cs       # schtasks 管理开机自启动
 ├── Utils/
-│   ├── Win32Display.cs         # P/Invoke：EnumDisplayDevices + QueryDisplayConfig
+│   ├── Win32Display.cs         # P/Invoke：EnumDisplayDevices 枚举“活动”显示器
+│   ├── EdidHelper.cs           # 读取注册表 EDID，解析真实型号名(0xFC 描述符)
 │   ├── Logger.cs               # %LOCALAPPDATA%\AutoDisplayPower\app.log
 │   ├── AppSettings.cs          # HKCU\Software\AutoDisplayPower
 │   └── TrayIconFactory.cs      # 运行时绘制托盘图标
@@ -78,8 +79,10 @@ dotnet publish .\AutoDisplayPower.csproj -c Release -p:PublishSingleFile=true -o
 
 ## 已知边界（v1.0）
 
-- 显示器**型号识别**依赖系统对“活动显示器”的枚举（EnumDisplayDevices / QueryDisplayConfig）；若某台显示器供电关闭导致型号不可读，
-  可能被当作“未知/已拔出”处理，属系统行为限制。
+- 显示器**型号识别**基于系统“活动显示器”枚举（EnumDisplayDevices）+ 注册表 EDID 名称描述符（0xFC）；
+  若某台显示器供电关闭导致 EDID 不可读，会被当作“未知/已拔出”处理，属系统行为限制。
+- **指纹匹配说明**：程序按 EDID 实际型号名匹配。外接屏 EDID 名记为 `KG257S PLUS`（字母 S），
+  与规格书文字 `KG2575 PLUS`（数字 5）不同，程序对两者均兼容；内屏为 `ATNA40HQ01-0`。
 - 合盖瞬间的睡眠触发由系统完成：本程序在**状态变化后**立即改写策略，若机器长时间处于
   “仅内屏→合盖睡眠”策略下直接合盖，会按既有策略立即睡眠（符合预期）；接外接后再合盖则不会睡眠。
 - 合盖状态下拔掉外接屏不会立刻睡眠（需要再次合盖或系统超时），此为规格书状态机的自然结果。
