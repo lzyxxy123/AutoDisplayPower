@@ -1,0 +1,57 @@
+# =====================
+#  Visual Studio / .NET 专用忽略文件
+#  适用项目：AutoDisplayPower (C# .NET 8.0 WinForms)
+# =====================
+
+# 编译输出文件夹（核心，必须忽略）
+/bin/
+/obj/
+/packages/
+/runtime/
+
+# 编译生成的文件（即使散落在外面也忽略）
+*.exe
+*.dll
+*.pdb
+*.so
+*.dylib
+*.nupkg
+*.cache
+*.log
+*.tmp
+
+# 用户本地配置文件（每个人的VS设置不同）
+*.user
+*.suo
+*.userprefs
+*.sln.docstates
+*.vspscc
+*.vssscc
+*.orig
+
+# Visual Studio 2022 专用本地缓存目录
+/.vs/
+/.vscode/
+
+# 发布/打包临时文件夹
+/out/
+/publish/
+
+# Windows 系统隐藏文件
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+*.DS_Store
+
+# 代码分析 / 测试临时文件
+*.coverage
+*.trx
+*.TestResults
+*.VisualState.xml
+
+# 安装包临时文件（如果你将来用 Inno Setup 等）
+*.exe.config
+*.manifest
+*.pem
+*.pfx
+*.snk
