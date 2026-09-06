@@ -33,4 +33,31 @@ public static class AppSettings
             // 忽略
         }
     }
+
+    public static string ReadString(string name, string defaultValue)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RootKeyPath);
+            string? v = key?.GetValue(name) as string;
+            return string.IsNullOrWhiteSpace(v) ? defaultValue : v!.Trim();
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    public static void WriteString(string name, string value)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(RootKeyPath);
+            key?.SetValue(name, value, RegistryValueKind.String);
+        }
+        catch
+        {
+            // 忽略
+        }
+    }
 }

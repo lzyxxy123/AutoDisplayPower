@@ -26,6 +26,7 @@ public sealed class MainForm : ApplicationContext
     private readonly ToolStripMenuItem _miInternal;
     private readonly ToolStripMenuItem _miExtend;
     private readonly ToolStripMenuItem _miStartup;
+    private readonly ToolStripMenuItem _miConfigDisplay;
     private readonly System.Windows.Forms.Timer _pollTimer;
     private readonly object _gate = new();
 
@@ -54,6 +55,7 @@ public sealed class MainForm : ApplicationContext
         _miInternal = new ToolStripMenuItem("💻 仅笔记本");
         _miExtend = new ToolStripMenuItem("🔄 扩展");
         _miStartup = new ToolStripMenuItem("开机自启动") { CheckOnClick = true };
+        _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…");
 
         _menu = new ContextMenuStrip();
         _menu.Items.Add(new ToolStripMenuItem("📊 状态（只读）") { Enabled = false });
@@ -66,6 +68,7 @@ public sealed class MainForm : ApplicationContext
         _menu.Items.Add(_miExtend);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_miStartup);
+        _menu.Items.Add(_miConfigDisplay);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(new ToolStripMenuItem("退出", null, (_, _) => Application.Exit()));
 
@@ -77,6 +80,7 @@ public sealed class MainForm : ApplicationContext
         _miInternal.Click += (_, _) => ManualSwitch(DisplaySwitcher.Mode.Internal);
         _miExtend.Click += (_, _) => ManualSwitch(DisplaySwitcher.Mode.Extend);
         _miStartup.CheckedChanged += (_, _) => OnStartupToggle();
+        _miConfigDisplay.Click += (_, _) => OpenConfig();
 
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
@@ -245,6 +249,24 @@ public sealed class MainForm : ApplicationContext
     }
 
     // ---------------- 手动操作 ----------------
+
+    private void OpenConfig()
+    {
+        try
+        {
+            using var dlg = new ConfigForm();
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                _lastCore = string.Empty; // 配置变更后刷新状态
+                Orchestrate();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("打开显示器型号配置失败", ex);
+            TryBalloon("打开配置失败：" + ex.Message);
+        }
+    }
 
     private void ManualSwitch(DisplaySwitcher.Mode mode)
     {

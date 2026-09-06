@@ -65,24 +65,57 @@ public sealed class MonitorScanResult
     }
 }
 
+/// <summary>显示器归类配置（可由用户在托盘菜单里配置，默认兼容当前机型）。</summary>
+public sealed class MonitorConfig
+{
+    /// <summary>笔记本内屏型号（EDID 名称）。</summary>
+    public string InternalModel { get; set; } = "ATNA40HQ01-0";
+
+    /// <summary>已知外接屏型号列表（仅当 AnyExternal=false 时生效）。</summary>
+    public List<string> ExternalModels { get; set; } = new() { "KG2575 PLUS", "KG257S PLUS" };
+
+    /// <summary>true=任意非内屏显示器都算外接屏（换外接屏免配置，推荐）。</summary>
+    public bool AnyExternal { get; set; } = true;
+
+    /// <summary>从注册表读取配置（未设置用默认值）。</summary>
+    public static MonitorConfig Load()
+    {
+        var cfg = new MonitorConfig
+        {
+            InternalModel = AppSettings.ReadString("InternalModel", "ATNA40HQ01-0"),
+            AnyExternal = AppSettings.ReadBool("AnyExternal", true),
+        };
+
+        string ext = AppSettings.ReadString("ExternalModels", "KG2575 PLUS,KG257S PLUS");
+        cfg.ExternalModels = ext
+            .Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        return cfg;
+    }
+
+    /// <summary>保存到注册表。</summary>
+    public void Save()
+    {
+        AppSettings.WriteString("InternalModel", InternalModel);
+        AppSettings.WriteString("ExternalModels", string.Join(",", ExternalModels));
+        AppSettings.WriteBool("AnyExternal", AnyExternal);
+    }
+}
+
 /// <summary>
 /// 显示器型号扫描器：枚举当前【活动】显示器（EnumDisplayDevices），
-/// 读取其 EDID 名称描述符（0xFC）获得真实型号，
-/// 根据已知指纹（内屏 ATNA40HQ01-0 / 外接 KG257S PLUS）归类；
-/// 其他未知型号一律忽略（不影响判定）。
+/// 读取其 EDID 名称描述符（0xFC）获得真实型号，按【用户配置的型号】归类；
+/// 未匹配的型号为“未知”，不影响判定。
 /// </summary>
 public static class DisplayDetector
 {
-    private static readonly string[] InternalTokens = { "ATNA40HQ01-0", "ATNA40HQ010" };
-
-    // 外接屏指纹：规格书写作 KG2575 PLUS，实际 EDID 名称为 KG257S PLUS（5 与 S 易混），两者都兼容
-    private static readonly string[] ExternalTokens = { "KG2575 PLUS", "KG257S PLUS", "KG2575", "KG257S", "KG257" };
-
     public static MonitorScanResult Scan()
     {
         var result = new MonitorScanResult { Ok = true };
         try
         {
+            var config = MonitorConfig.Load();
             var probes = Win32Display.EnumerateActiveMonitors();
             bool internalAdded = false;
             bool externalAdded = false;
@@ -99,8 +132,10 @@ public static class DisplayDetector
                 string probeText = $"{id} | {probe.Friendly} | {edidName}";
                 if (string.IsNullOrWhiteSpace(probeText)) continue;
 
-                bool isInternal = MatchesAny(probeText, InternalTokens);
-                bool isExternal = MatchesAny(probeText, ExternalTokens);
+                bool isInternal = MatchesModel(probeText, config.InternalModel);
+                // 外接屏：配置了“任意外接屏”→ 任意非内屏显示器；否则仅匹配已知外接型号
+                bool isExternal = !isInternal &&
+                    (config.AnyExternal || config.ExternalModels.Any(m => MatchesModel(probeText, m)));
 
                 if (isInternal && !internalAdded)
                 {
@@ -108,7 +143,7 @@ public static class DisplayDetector
                     result.Monitors.Add(new MonitorInfo
                     {
                         InstanceName = id.Length > 0 ? id : probe.Friendly,
-                        ModelName = edidName.Length > 0 ? $"笔记本内屏 ({edidName})" : "笔记本内屏 (ATNA40HQ01-0)",
+                        ModelName = edidName.Length > 0 ? $"笔记本内屏 ({edidName})" : $"笔记本内屏 ({config.InternalModel})",
                         Kind = MonitorKind.Internal,
                     });
                 }
@@ -119,7 +154,7 @@ public static class DisplayDetector
                     result.Monitors.Add(new MonitorInfo
                     {
                         InstanceName = id.Length > 0 ? id : probe.Friendly,
-                        ModelName = edidName.Length > 0 ? $"外接屏 ({edidName})" : "外接屏 (KG2575 PLUS)",
+                        ModelName = edidName.Length > 0 ? $"外接屏 ({edidName})" : "外接屏",
                         Kind = MonitorKind.External,
                     });
                 }
@@ -159,18 +194,15 @@ public static class DisplayDetector
         return result;
     }
 
-    private static bool MatchesAny(string probe, string[] tokens)
+    /// <summary>判定文本是否包含某个型号（忽略大小写与空格差异）。</summary>
+    private static bool MatchesModel(string probe, string model)
     {
-        if (string.IsNullOrWhiteSpace(probe)) return false;
+        if (string.IsNullOrWhiteSpace(probe) || string.IsNullOrWhiteSpace(model)) return false;
+        string m = model.Trim();
+        if (probe.IndexOf(m, StringComparison.OrdinalIgnoreCase) >= 0) return true;
         string compact = Regex.Replace(probe, @"\s+", string.Empty);
-        foreach (string token in tokens)
-        {
-            if (probe.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            string compactToken = Regex.Replace(token, @"\s+", string.Empty);
-            if (compact.IndexOf(compactToken, StringComparison.OrdinalIgnoreCase) >= 0) return true;
-        }
-
-        return false;
+        string compactModel = Regex.Replace(m, @"\s+", string.Empty);
+        return compactModel.Length > 0 && compact.IndexOf(compactModel, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     /// <summary>从未知显示器生成一个可读简称：优先 EDID 名，其次设备友好名，最后取设备实例型号段。</summary>

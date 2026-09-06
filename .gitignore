@@ -36,6 +36,7 @@
 # 发布/打包临时文件夹
 /out/
 /publish/
+/publish-small/
 
 # Windows 系统隐藏文件
 Thumbs.db

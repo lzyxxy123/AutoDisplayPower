@@ -34,9 +34,10 @@ AutoDisplayPower/
 ├── AutoDisplayPower.csproj     # .NET 8.0 WinForms
 ├── Program.cs                  # 入口（含 --check 自检参数）
 ├── MainForm.cs                 # 托盘图标 + 主循环（ApplicationContext）
+├── ConfigForm.cs               # 显示器型号配置对话框
 ├── CheckMode.cs                # 只读自检模式
 ├── Services/
-│   ├── DisplayDetector.cs      # EDID 型号识别（读取 0xFC 描述符）+ 状态机规则
+│   ├── DisplayDetector.cs      # EDID 型号识别（可配置型号）+ 状态机规则
 │   ├── PowerManager.cs         # powercfg 修改 LIDACTION（AC/DC）
 │   ├── DisplaySwitcher.cs      # DisplaySwitch.exe 切换显示模式
 │   └── StartupManager.cs       # 开机自启动：任务计划程序 + Run 键兜底
@@ -45,9 +46,9 @@ AutoDisplayPower/
 │   ├── DisplayTopology.cs      # P/Invoke：QueryDisplayConfig 判定开/合盖
 │   ├── EdidHelper.cs           # 读取注册表 EDID，解析真实型号名(0xFC 描述符)
 │   ├── Logger.cs               # %LOCALAPPDATA%\AutoDisplayPower\app.log
-│   ├── AppSettings.cs          # HKCU\Software\AutoDisplayPower
+│   ├── AppSettings.cs          # HKCU\Software\AutoDisplayPower（含显示器型号配置）
 │   └── TrayIconFactory.cs      # 运行时绘制托盘图标
-└── publish.ps1                 # 单文件自包含发布脚本
+└── publish.ps1                 # 发布脚本（自包含 / -Small 小体积）
 ```
 
 ## 构建与发布
@@ -56,16 +57,25 @@ AutoDisplayPower/
 # 编译（Debug）
 dotnet build
 
-# 独立发布（单文件自包含，输出 .\publish\AutoDisplayPower.exe）
+# 自包含单文件发布（约 68MB，无需运行时，适合分发）
 .\publish.ps1
-```
-*发布说明*：自包含单文件约 68MB（WinForms 自包含的合理体积，规格书预估 20~40MB 偏乐观）。
-项目**无任何第三方 NuGet 依赖**（显示器枚举走纯 Win32 API），可完全离线构建。
-若目标机已安装 .NET 8 Desktop Runtime（本机已装 8.0.30），可改用框架依赖发布把体积降到 1MB 以内：
 
-```powershell
-dotnet publish .\AutoDisplayPower.csproj -c Release -p:PublishSingleFile=true -o .\publish-fd
+# 小体积发布（约 0.2MB，需目标机已装 .NET 8 Desktop Runtime，本机已装）
+.\publish.ps1 -Small
 ```
+*发布说明*：项目**无任何第三方 NuGet 依赖**（显示器枚举走纯 Win32 API），可完全离线构建。
+- **自包含单文件**约 68MB：打包了整套 .NET 8 运行时，任何 Win11 都能跑，无需安装运行时。
+- **框架依赖版**仅约 **0.2MB**：体积大幅减小，但目标机需已安装 .NET 8 Desktop Runtime（本机已装 8.0.30）。
+  体积大**不是环境问题**，而是"是否把运行时一起打包"的区别；目标机有运行时就用小体积版。
+
+## 显示器型号配置
+
+程序按"内屏型号"与"外接屏型号"归类，可在托盘菜单 **「显示器型号配置…」** 里随时修改：
+
+- **内屏型号**：笔记本内置屏的 EDID 型号（默认 `ATNA40HQ01-0`）。
+- **外接屏型号**：多个用逗号分隔；默认勾选 **「任意外接屏」**——任意非内屏显示器都算外接屏，
+  这样**换外接屏无需改配置**即可继续用。若不勾选，则只把列表中列出的型号当外接屏。
+- 配置保存在 `HKCU\Software\AutoDisplayPower`，保存后立即生效。
 
 ## 自检模式（不改动任何设置）
 
