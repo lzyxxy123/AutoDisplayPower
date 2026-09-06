@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AutoDisplayPower</RootNamespace>
+    <AssemblyName>AutoDisplayPower</AssemblyName>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Product>AutoDisplayPower</Product>
+    <Description>智能显示器电源管理助手（按活动显示器型号自动调整合盖电源策略与显示模式）</Description>
+    <Company>lzyxxy123</Company>
+    <LangVersion>latest</LangVersion>
+    <!-- 纯 Win32 实现，无第三方 NuGet 依赖；关闭联网漏洞审计以便完全离线构建 -->
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+
+</Project>
