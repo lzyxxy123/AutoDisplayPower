@@ -43,8 +43,11 @@ public sealed class MonitorScanResult
     public string? Error { get; set; }
     public List<MonitorInfo> Monitors { get; } = new();
 
-    /// <summary>合盖状态：由 QueryDisplayConfig 判断内屏是否物理“可用”推断（区分开盖/关盖）。</summary>
+    /// <summary>合盖状态：由 WMI WmiMonitorID（已连接显示器）判断内屏是否存在（开盖/关盖）。</summary>
     public LidState Lid { get; set; } = LidState.Unknown;
+
+    /// <summary>合盖判断的细节说明（用于自检/日志）。</summary>
+    public string LidDetail { get; set; } = "";
 
     public bool HasInternal => Monitors.Any(m => m.Kind == MonitorKind.Internal);
     public bool HasExternal => Monitors.Any(m => m.Kind == MonitorKind.External);
@@ -174,16 +177,12 @@ public static class DisplayDetector
                 }
             }
 
-            // 合盖状态：用 QueryDisplayConfig 判断内屏是否物理“可用”（区分“开盖但未激活”与“关盖断开”）
-            try
-            {
-                var lidTargets = DisplayTopology.EnumerateTargets(onlyActivePaths: false);
-                result.Lid = DisplayTopology.DetectLidState(lidTargets);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"读取合盖状态失败：{ex.Message}");
-            }
+            // 合盖状态：WMI WmiMonitorID 列出的是“已连接”显示器（含未激活的内屏）。
+            // 实测：开盖时内屏在列表中（即使当前为“仅外接”模式）；关盖后内屏从列表消失。
+            // → 零切换、零闪烁、零黑屏即可判断开/合盖。
+            var (lid, lidDetail) = DetectLidByWmi(config);
+            result.Lid = lid;
+            result.LidDetail = lidDetail;
         }
         catch (Exception ex)
         {
@@ -203,6 +202,41 @@ public static class DisplayDetector
         string compact = Regex.Replace(probe, @"\s+", string.Empty);
         string compactModel = Regex.Replace(m, @"\s+", string.Empty);
         return compactModel.Length > 0 && compact.IndexOf(compactModel, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>
+    /// 用 WMI root\wmi\WmiMonitorID（“已连接”显示器列表，含未激活的内屏）判断合盖状态：
+    /// 内屏在列表中 → 开盖；查询成功但内屏不在列表 → 关盖；查询失败 → 未知。
+    /// 该方式无需切换显示，不闪屏、不黑屏。
+    /// </summary>
+    public static (LidState Lid, string Detail) DetectLidByWmi(MonitorConfig config)
+    {
+        var q = WmiQuery.QueryProperty(@"root\wmi", "SELECT InstanceName FROM WmiMonitorID", "InstanceName");
+        if (!q.Ok) return (LidState.Unknown, "WMI 查询失败：" + (q.Error ?? "未知错误"));
+
+        var names = new List<string>();
+        bool internalConnected = false;
+        int resolved = 0;
+
+        foreach (string instance in q.Values)
+        {
+            string edidName = EdidHelper.ResolveModelName(instance);
+            if (edidName.Length > 0) resolved++;
+            names.Add(edidName.Length > 0 ? edidName : instance);
+
+            if (MatchesModel(edidName, config.InternalModel) || MatchesModel(instance, config.InternalModel))
+                internalConnected = true;
+        }
+
+        // 有实例但一个型号名都解析不出来 → 无法可靠判断，不误报
+        if (q.Values.Count > 0 && resolved == 0)
+            return (LidState.Unknown, $"WMI 已连接 {q.Values.Count} 台，但型号名解析失败（内屏={config.InternalModel}）");
+
+        string detail = names.Count == 0
+            ? "WMI 未列出任何已连接显示器"
+            : "WMI 已连接：" + string.Join("、", names);
+
+        return (internalConnected ? LidState.Open : LidState.Closed, detail);
     }
 
     /// <summary>从未知显示器生成一个可读简称：优先 EDID 名，其次设备友好名，最后取设备实例型号段。</summary>

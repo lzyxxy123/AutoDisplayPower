@@ -76,6 +76,7 @@ public static class CheckMode
 
         sb.AppendLine($"[屏幕状态] {StateRules.Describe(snap.State)}");
         sb.AppendLine($"[推断盖子] {StateRules.LidText(snap.Lid)}");
+        if (!string.IsNullOrEmpty(snap.LidDetail)) sb.AppendLine($"[盖子判据] {snap.LidDetail}");
         var (lid, policyText) = StateRules.ExpectedPolicy(snap.State);
         sb.AppendLine($"[期望策略] {policyText}  (LIDACTION = {(lid.HasValue ? lid.Value.ToString() : "不变")})");
 
