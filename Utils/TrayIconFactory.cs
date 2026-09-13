@@ -24,6 +24,9 @@ internal static class TrayIconFactory
         return icon;
     }
 
+    /// <summary>清空缓存（切换主题后调用，使托盘图标按新配色重绘）。</summary>
+    public static void ClearCache() => Cache.Clear();
+
     private static Icon Create(ScreenState state)
     {
         const int S = 32;

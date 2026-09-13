@@ -26,9 +26,12 @@ internal static class MenuIconFactory
         Cache.Clear();
     }
 
+    /// <summary>清空缓存（切换主题后调用，使图标按新配色重新绘制）。</summary>
+    public static void ClearCache() => Cache.Clear();
+
     // ---------------- 对外图标 ----------------
 
-    public static Image ModeExternal() => Get("mode-ext", g => DrawMonitor(g, UiTheme.Accent));
+    public static Image ModeExternal() => Get("mode-ext", g => DrawMonitor(g, UiTheme.Blue));
     public static Image ModeInternal() => Get("mode-int", g => DrawLaptop(g, UiTheme.Teal));
     public static Image ModeExtend() => Get("mode-2", g => DrawDualMonitor(g, UiTheme.Purple));
 
@@ -53,7 +56,7 @@ internal static class MenuIconFactory
         if (failed) return Get("pol-fail", g => DrawWarnTriangle(g, UiTheme.Red));
         return value switch
         {
-            0 => Get("pol-none", g => DrawCircleGlyph(g, UiTheme.Accent, DrawPauseBars)),
+            0 => Get("pol-none", g => DrawCircleGlyph(g, UiTheme.Blue, DrawPauseBars)),
             1 => Get("pol-sleep", g => DrawMoon(g, UiTheme.Purple)),
             2 => Get("pol-sleep", g => DrawMoon(g, UiTheme.Purple)),
             3 => Get("pol-off", g => DrawPowerSymbol(g, UiTheme.Amber)),
@@ -65,6 +68,7 @@ internal static class MenuIconFactory
     public static Image Settings() => Get("settings", g => DrawSliders(g, UiTheme.Gray));
     public static Image PlugArrow() => Get("plug", g => DrawPlug(g, UiTheme.Accent));
     public static Image History() => Get("hist", g => DrawClock(g, UiTheme.Accent));
+    public static Image Palette() => Get("palette", g => DrawPalette(g, UiTheme.Accent));
     public static Image Blank() => Get("blank", _ => { });
 
     // ---------------- 绘制实现（16×16 设计空间）----------------
@@ -259,6 +263,19 @@ internal static class MenuIconFactory
         g.DrawEllipse(pen, 1.8f, 1.8f, 12.4f, 12.4f);
         g.DrawLine(pen, 8f, 4.6f, 8f, 8.4f);
         g.DrawLine(pen, 8f, 8.4f, 11.0f, 10.0f);
+    }
+
+    /// <summary>调色板：圆环 + 三色点（表示可切换主题）。</summary>
+    private static void DrawPalette(Graphics g, Color color)
+    {
+        using (var pen = new Pen(color, 1.5f))
+        {
+            g.DrawEllipse(pen, 1.4f, 1.4f, 13.2f, 13.2f);
+        }
+
+        using (var b = new SolidBrush(UiTheme.Blue)) g.FillEllipse(b, 3.8f, 3.8f, 3.2f, 3.2f);
+        using (var b = new SolidBrush(UiTheme.Green)) g.FillEllipse(b, 9.0f, 3.8f, 3.2f, 3.2f);
+        using (var b = new SolidBrush(UiTheme.Purple)) g.FillEllipse(b, 6.4f, 9.0f, 3.2f, 3.2f);
     }
 
     // ---------------- 通用工具 ----------------

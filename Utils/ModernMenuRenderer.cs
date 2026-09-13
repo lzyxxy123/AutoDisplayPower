@@ -75,25 +75,49 @@ internal sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
         bool activeMode = tag == MenuTag.Mode && IsChecked(e.Item);
         bool emphasize = tag == MenuTag.Emphasize;
 
-        if (activeMode || emphasize)
-        {
-            if (e.Item.Selected)
-            {
-                base.OnRenderMenuItemBackground(e);
-                DrawPill(e.Graphics, e.Item.Bounds, UiTheme.Hover);
-            }
-            else
-            {
-                DrawPill(e.Graphics, e.Item.Bounds, emphasize ? UiTheme.PillStrong : UiTheme.Pill);
-            }
-        }
-        else
+        if (e.Item.Selected)
         {
             base.OnRenderMenuItemBackground(e);
+        }
+        else if (emphasize)
+        {
+            DrawPill(e.Graphics, e.Item.Bounds, UiTheme.PillStrong);
+        }
+
+        if (activeMode)
+        {
+            if (UiTheme.Current.UseLeftBar)
+            {
+                DrawLeftBar(e.Graphics, e.Item.Bounds, UiTheme.Accent); // 极简主题：左侧细色条
+            }
+            else if (!e.Item.Selected)
+            {
+                DrawPill(e.Graphics, e.Item.Bounds, UiTheme.Pill);
+            }
         }
 
         if (tag == MenuTag.Switch)
             DrawSwitch(e.Graphics, e.Item.Bounds, IsChecked(e.Item));
+    }
+
+    /// <summary>极简主题：当前模式用左侧细色条表示。</summary>
+    private static void DrawLeftBar(Graphics g, Rectangle bounds, Color color)
+    {
+        var r = new Rectangle(bounds.Left + 4, bounds.Top + 4, 3, bounds.Height - 8);
+        if (r.Height <= 0) return;
+
+        SmoothingMode old = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        try
+        {
+            using var path = Rounded(r, 1.5f);
+            using var brush = new SolidBrush(color);
+            g.FillPath(brush, path);
+        }
+        finally
+        {
+            g.SmoothingMode = old;
+        }
     }
 
     private static bool IsChecked(ToolStripItem item) => item is ToolStripMenuItem m && m.Checked;

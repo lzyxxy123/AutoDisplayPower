@@ -30,6 +30,8 @@ public sealed class MainForm : ApplicationContext
     private readonly ToolStripMenuItem _miPlugExternal;
     private readonly ToolStripMenuItem _miPlugExtend;
     private readonly ToolStripMenuItem _miPlugRemember;
+    private readonly ToolStripMenuItem _miThemeMenu;
+    private readonly List<ToolStripMenuItem> _miThemeItems = new();
     private readonly ToolStripMenuItem _miStartup;
     private readonly ToolStripMenuItem _miConfigDisplay;
     private readonly System.Windows.Forms.Timer _pollTimer;
@@ -107,6 +109,17 @@ public sealed class MainForm : ApplicationContext
         };
         _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…") { Image = MenuIconFactory.Settings() };
 
+        // 界面主题子菜单（单选）
+        _miThemeMenu = new ToolStripMenuItem("界面主题") { Image = MenuIconFactory.Palette() };
+        foreach (Theme theme in ThemeCatalog.All)
+        {
+            Theme captured = theme;
+            var item = new ToolStripMenuItem(theme.Name) { Tag = MenuTag.Mode };
+            item.Click += (_, _) => ApplyTheme(captured.Key);
+            _miThemeItems.Add(item);
+            _miThemeMenu.DropDownItems.Add(item);
+        }
+
         _menu.Items.Add(_miStatusTitle);
         _menu.Items.Add(_miScreens);
         _menu.Items.Add(_miLid);
@@ -117,6 +130,7 @@ public sealed class MainForm : ApplicationContext
         _menu.Items.Add(_miExtend);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_miPlugMenu);
+        _menu.Items.Add(_miThemeMenu);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_miStartup);
         _menu.Items.Add(_miConfigDisplay);
@@ -136,6 +150,7 @@ public sealed class MainForm : ApplicationContext
         {
             RefreshStatusFromCurrent();
             RefreshPlugMenu(); // 子菜单对钩/当前记录也保持最新
+            RefreshThemeMenu();
             SyncMenuColors();
         };
 
@@ -149,6 +164,7 @@ public sealed class MainForm : ApplicationContext
         _miPlugExtend.Click += (_, _) => SetPlugBehavior(PlugBehavior.FixedExtend);
         _miPlugRemember.Click += (_, _) => SetPlugBehavior(PlugBehavior.RememberLast);
         RefreshPlugMenu();
+        RefreshThemeMenu();
 
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
@@ -494,12 +510,59 @@ public sealed class MainForm : ApplicationContext
     {
         foreach (ToolStripItem item in _menu.Items) yield return item;
         foreach (ToolStripItem item in _miPlugMenu.DropDownItems) yield return item;
+        foreach (ToolStripItem item in _miThemeMenu.DropDownItems) yield return item;
     }
 
-    /// <summary>开机自启动的开关状态由滑动开关呈现，文字保持近黑。</summary>
+    /// <summary>文字统一跟随主题（彩色语义交给图标）。</summary>
     private void SyncMenuColors()
     {
-        _miStartup.ForeColor = UiTheme.TextPrimary;
+        foreach (ToolStripItem item in AllMenuItems())
+        {
+            if (item is ToolStripMenuItem menuItem) menuItem.ForeColor = UiTheme.TextPrimary;
+        }
+    }
+
+    /// <summary>切换界面主题：持久化 + 清图标缓存 + 重绘。</summary>
+    private void ApplyTheme(string key)
+    {
+        UiTheme.SetTheme(key);
+
+        MenuIconFactory.ClearCache();
+        TrayIconFactory.ClearCache();
+        RebuildIcons();
+
+        SyncMenuColors();
+        RefreshThemeMenu();
+        RefreshStatusFromCurrent();
+        _menu.Invalidate();
+
+        Logger.Info($"界面主题已切换为：{UiTheme.Current.Name}");
+    }
+
+    /// <summary>清缓存后按新配色重建各项图标。</summary>
+    private void RebuildIcons()
+    {
+        _miStatusTitle.Image = MenuIconFactory.Blank();
+        _miExternal.Image = MenuIconFactory.ModeExternal();
+        _miInternal.Image = MenuIconFactory.ModeInternal();
+        _miExtend.Image = MenuIconFactory.ModeExtend();
+        _miPlugExternal.Image = MenuIconFactory.ModeExternal();
+        _miPlugExtend.Image = MenuIconFactory.ModeExtend();
+        _miPlugRemember.Image = MenuIconFactory.History();
+        _miPlugMenu.Image = MenuIconFactory.PlugArrow();
+        _miThemeMenu.Image = MenuIconFactory.Palette();
+        _miStartup.Image = MenuIconFactory.Power();
+        _miConfigDisplay.Image = MenuIconFactory.Settings();
+        // 状态行图标由 UpdateStatusFrom 按当前状态重设
+    }
+
+    /// <summary>刷新主题子菜单的选中项。</summary>
+    private void RefreshThemeMenu()
+    {
+        for (int i = 0; i < _miThemeItems.Count && i < ThemeCatalog.All.Count; i++)
+        {
+            _miThemeItems[i].Checked = ThemeCatalog.All[i].Key == UiTheme.CurrentKey;
+        }
     }
 
     /// <summary>
