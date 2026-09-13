@@ -23,14 +23,36 @@ try {
             $r = $s.GetType().InvokeMember('ExecQuery', $f, $null, $s, [object[]]@('SELECT InstanceName FROM WmiMonitorID'))
             $c = $r.GetType().InvokeMember('Count', $gp, $null, $r, $null)
             Write-Host "  ExecQuery OK  Count=$c" -ForegroundColor Green
-            if ($c -gt 0) {
-                foreach ($i in 1..$c) {
-                    $item = $r.GetType().InvokeMember('Item', $f, $null, $r, [object[]]@($i))
-                    $n = $item.GetType().InvokeMember('InstanceName', $gp, $null, $item, $null)
-                    Write-Host "      $n"
+        } catch { Write-Host "  ExecQuery 失败: $(Show-Inner $_.Exception)" -ForegroundColor Red; $r = $null }
+
+        # [1a] 方式一：_NewEnum 顺序枚举（程序现在用的方式）
+        Write-Host "  --- [1a] _NewEnum 顺序枚举（程序当前方式）---"
+        try {
+            $ev = $r.GetType().InvokeMember('_NewEnum', $gp, $null, $r, $null)
+            Write-Host "      _NewEnum 取得: $($ev.GetType().FullName)"
+            $en = $ev -as [System.Collections.IEnumerator]
+            if ($null -eq $en) { Write-Host "      无法转为 IEnumerator" -ForegroundColor Red }
+            else {
+                $cnt = 0
+                while ($en.MoveNext()) {
+                    $item = $en.Current
+                    $v = $item.GetType().InvokeMember('InstanceName', $gp, $null, $item, $null)
+                    Write-Host "        $v" -ForegroundColor Green
+                    $cnt++
                 }
+                Write-Host "      枚举完成，共 $cnt 条" -ForegroundColor Green
             }
-        } catch { Write-Host "  ExecQuery 失败: $(Show-Inner $_.Exception)" -ForegroundColor Red }
+        } catch { Write-Host "      _NewEnum 失败: $(Show-Inner $_.Exception)" -ForegroundColor Red }
+
+        # [1b] 方式二：Count + Item(index) 回退
+        Write-Host "  --- [1b] Count + Item(index) 回退方式 ---"
+        try {
+            foreach ($i in 1..$c) {
+                $item = $r.GetType().InvokeMember('Item', $f, $null, $r, [object[]]@($i))
+                $n = $item.GetType().InvokeMember('InstanceName', $gp, $null, $item, $null)
+                Write-Host "        $n"
+            }
+        } catch { Write-Host "      Item 失败: $(Show-Inner $_.Exception)" -ForegroundColor Red }
     }
 } catch { Write-Host "  COM 失败: $(Show-Inner $_.Exception)" -ForegroundColor Red }
 
@@ -62,7 +84,7 @@ if (Test-Path $exe) {
     Start-Process -FilePath $exe -ArgumentList '--check' -Wait | Out-Null
     Start-Sleep -Seconds 1
     $rep = Join-Path $env:LOCALAPPDATA 'AutoDisplayPower\check-report.txt'
-    if (Test-Path $rep) { Get-Content $rep | ForEach-Object { Write-Host "  $_" } }
+    if (Test-Path $rep) { Get-Content $rep -Encoding UTF8 | ForEach-Object { Write-Host "  $_" } }
     else { Write-Host "  找不到报告文件: $rep" -ForegroundColor Red }
 } else { Write-Host "  找不到 AutoDisplayPower.exe（请先发布）" -ForegroundColor Red }
 

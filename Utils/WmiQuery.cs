@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -10,12 +11,14 @@ public sealed class WmiQueryResult
 {
     public bool Ok { get; set; }
     public string? Error { get; set; }
+    public string Method { get; set; } = "";
     public List<string> Values { get; } = new();
 }
 
 /// <summary>
 /// 通过 Windows 自带的 WMI 脚本 COM（WbemScripting.SWbemLocator，无需第三方包）查询 WMI。
 /// 说明：本项目构建环境无法访问 nuget.org，无法引用 System.Management，故改用晚绑定 COM。
+/// 取条目优先用 _NewEnum 顺序枚举（ExecQuery 返回的 SWbemObjectSet 不支持 Item(index) 随机访问）。
 /// </summary>
 public static class WmiQuery
 {
@@ -58,24 +61,29 @@ public static class WmiQuery
                 return result;
             }
 
-            int count = Convert.ToInt32(set.GetType().InvokeMember("Count", GetProperty, null, set, null));
-            for (int i = 1; i <= count; i++)
+            // 方式一：_NewEnum 顺序枚举（推荐）
+            if (TryEnumerateViaNewEnum(set, propertyName, result.Values, out string? enumError))
             {
-                object? item = set.GetType().InvokeMember("Item", InvokeMethod, null, set, new object?[] { i });
-                if (item is null) continue;
-                object? value = item.GetType().InvokeMember(propertyName, GetProperty, null, item, null);
-                if (value is not null) result.Values.Add(value.ToString() ?? string.Empty);
+                result.Ok = true;
+                result.Method = "_NewEnum";
+                return result;
             }
 
-            result.Ok = true;
+            // 方式二：Count + Item(index) 回退
+            result.Values.Clear();
+            if (TryEnumerateViaItem(set, propertyName, result.Values, out string? itemError))
+            {
+                result.Ok = true;
+                result.Method = "Item";
+                return result;
+            }
+
+            result.Error = $"_NewEnum 失败({enumError})；Item 失败({itemError})";
             return result;
         }
         catch (Exception ex)
         {
-            // 反射调用会包一层 TargetInvocationException，取最内层原因（如“拒绝访问”）
-            Exception inner = ex;
-            while (inner.InnerException is not null) inner = inner.InnerException;
-            result.Error = inner.Message;
+            result.Error = InnerMessage(ex);
             return result;
         }
         finally
@@ -84,6 +92,65 @@ public static class WmiQuery
             Release(services);
             Release(locator);
         }
+    }
+
+    private static bool TryEnumerateViaNewEnum(object set, string propertyName, List<string> values, out string? error)
+    {
+        error = null;
+        try
+        {
+            object? enumVar = set.GetType().InvokeMember("_NewEnum", GetProperty, null, set, null);
+            if (enumVar is not IEnumerator enumerator)
+            {
+                error = "未取得 IEnumerator";
+                return false;
+            }
+
+            while (enumerator.MoveNext())
+            {
+                object? item = enumerator.Current;
+                if (item is null) continue;
+                object? value = item.GetType().InvokeMember(propertyName, GetProperty, null, item, null);
+                if (value is not null) values.Add(value.ToString() ?? string.Empty);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = InnerMessage(ex);
+            return false;
+        }
+    }
+
+    private static bool TryEnumerateViaItem(object set, string propertyName, List<string> values, out string? error)
+    {
+        error = null;
+        try
+        {
+            int count = Convert.ToInt32(set.GetType().InvokeMember("Count", GetProperty, null, set, null));
+            for (int i = 1; i <= count; i++)
+            {
+                object? item = set.GetType().InvokeMember("Item", InvokeMethod, null, set, new object?[] { i });
+                if (item is null) continue;
+                object? value = item.GetType().InvokeMember(propertyName, GetProperty, null, item, null);
+                if (value is not null) values.Add(value.ToString() ?? string.Empty);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = InnerMessage(ex);
+            return false;
+        }
+    }
+
+    private static string InnerMessage(Exception ex)
+    {
+        Exception inner = ex;
+        while (inner.InnerException is not null) inner = inner.InnerException;
+        return inner.Message.Trim();
     }
 
     private static void Release(object? comObject)

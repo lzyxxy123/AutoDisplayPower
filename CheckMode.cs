@@ -113,7 +113,7 @@ public static class CheckMode
                 "AutoDisplayPower");
             Directory.CreateDirectory(dir);
             string file = Path.Combine(dir, "check-report.txt");
-            File.WriteAllText(file, report, new UTF8Encoding(false));
+            File.WriteAllText(file, report, new UTF8Encoding(true));
             Console.WriteLine("报告文件：" + file);
         }
         catch

@@ -212,7 +212,7 @@ public static class DisplayDetector
     public static (LidState Lid, string Detail) DetectLidByWmi(MonitorConfig config)
     {
         var q = WmiQuery.QueryProperty(@"root\wmi", "SELECT InstanceName FROM WmiMonitorID", "InstanceName");
-        if (!q.Ok) return (LidState.Unknown, "WMI 查询失败：" + (q.Error ?? "未知错误"));
+        if (!q.Ok) return (LidState.Unknown, $"WMI 查询失败（{q.Error ?? "未知错误"}）");
 
         var names = new List<string>();
         bool internalConnected = false;
@@ -234,7 +234,7 @@ public static class DisplayDetector
 
         string detail = names.Count == 0
             ? "WMI 未列出任何已连接显示器"
-            : "WMI 已连接：" + string.Join("、", names);
+            : $"WMI 已连接（{q.Method}）：" + string.Join("、", names);
 
         return (internalConnected ? LidState.Open : LidState.Closed, detail);
     }
