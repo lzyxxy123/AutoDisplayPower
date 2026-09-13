@@ -19,6 +19,7 @@ public sealed class MainForm : ApplicationContext
 
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _menu;
+    private readonly ToolStripMenuItem _miStatusTitle;
     private readonly ToolStripMenuItem _miScreens;
     private readonly ToolStripMenuItem _miLid;
     private readonly ToolStripMenuItem _miPolicy;
@@ -51,14 +52,15 @@ public sealed class MainForm : ApplicationContext
     {
         _tray = new NotifyIcon
         {
-            Icon = TrayIconFactory.Create(),
+            Icon = TrayIconFactory.GetStateIcon(ScreenState.Unknown),
             Text = "AutoDisplayPower 智能显示器电源管理",
             Visible = true,
         };
 
-        _miScreens = new ToolStripMenuItem("  当前屏幕：—") { Enabled = false };
-        _miLid = new ToolStripMenuItem("  推断盖子状态：—") { Enabled = false };
-        _miPolicy = new ToolStripMenuItem("  电源策略：—") { Enabled = false };
+        _miStatusTitle = new ToolStripMenuItem("📊 状态") { Enabled = false, ForeColor = UiTheme.TextSecondary };
+        _miScreens = new ToolStripMenuItem("  当前屏幕：—") { Enabled = false, ForeColor = UiTheme.TextSecondary };
+        _miLid = new ToolStripMenuItem("  盖子状态：—") { Enabled = false, ForeColor = UiTheme.TextSecondary };
+        _miPolicy = new ToolStripMenuItem("  电源策略：—") { Enabled = false, ForeColor = UiTheme.TextSecondary };
         _miExternal = new ToolStripMenuItem("🖥️ 仅外接");
         _miInternal = new ToolStripMenuItem("💻 仅笔记本");
         _miExtend = new ToolStripMenuItem("🔄 扩展");
@@ -76,8 +78,8 @@ public sealed class MainForm : ApplicationContext
         _miStartup = new ToolStripMenuItem("开机自启动") { CheckOnClick = true };
         _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…");
 
-        _menu = new ContextMenuStrip();
-        _menu.Items.Add(new ToolStripMenuItem("📊 状态（只读）") { Enabled = false });
+        _menu = new ContextMenuStrip { Renderer = new ModernMenuRenderer() };
+        _menu.Items.Add(_miStatusTitle);
         _menu.Items.Add(_miScreens);
         _menu.Items.Add(_miLid);
         _menu.Items.Add(_miPolicy);
@@ -95,7 +97,12 @@ public sealed class MainForm : ApplicationContext
 
         _tray.ContextMenuStrip = _menu;
         _tray.DoubleClick += OnTrayDoubleClick;
-        _menu.Opening += (_, _) => RefreshStatusFromCurrent();
+        _menu.Opening += (_, _) =>
+        {
+            RefreshStatusFromCurrent();
+            RefreshPlugMenu(); // 子菜单对钩/当前记录也保持最新
+            SyncMenuColors();
+        };
 
         _miExternal.Click += (_, _) => ManualSwitch(DisplaySwitcher.Mode.External);
         _miInternal.Click += (_, _) => ManualSwitch(DisplaySwitcher.Mode.Internal);
@@ -315,22 +322,83 @@ public sealed class MainForm : ApplicationContext
     {
         if (!snap.Ok) return;
 
-        // 三个切换项的对钩：按【当前实际显示状态】打勾（未知则都不打勾）
+        // 三个切换项的对钩：按【当前实际显示状态】打勾（未知则都不打勾），并对勾项用语义色
         _miExternal.Checked = snap.State == ScreenState.ExternalOnly;
         _miInternal.Checked = snap.State == ScreenState.InternalOnly;
         _miExtend.Checked = snap.State == ScreenState.Extended;
+        _miExternal.ForeColor = _miExternal.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
+        _miInternal.ForeColor = _miInternal.Checked ? UiTheme.Teal : UiTheme.TextPrimary;
+        _miExtend.ForeColor = _miExtend.Checked ? UiTheme.Purple : UiTheme.TextPrimary;
+
+        // 托盘图标颜色随屏幕状态变化
+        _tray.Icon = TrayIconFactory.GetStateIcon(snap.State);
 
         string screens = snap.Monitors.Count == 0
             ? "未检测到显示器"
             : string.Join("、", snap.Monitors.Select(m => m.ModelName).Distinct());
         string lid = StateRules.LidText(snap.Lid);
+
+        // 电源方案值只查询一次，供 策略行配色 / 悬停提示 / 策略文本 复用（避免重复启动 powercfg）
+        var policy = PowerManager.QueryLidAction();
+
+        // 状态行配色（由自定义渲染器保证只读项也显示该颜色）
+        _miScreens.ForeColor = UiTheme.ScreenStateColor(snap.State);
+        _miLid.ForeColor = UiTheme.LidColor(snap.Lid);
+        _miPolicy.ForeColor = PolicyLineColor(snap, policy);
+
+        // 悬停托盘图标时显示的单行摘要（含 屏幕 / 盖子 / 电源策略）
+        _tray.Text = BuildTrayTooltip(snap, policy);
+
         string core = $"{snap.State}|{screens}|{lid}";
         if (core == _lastCore) return;
 
         _lastCore = core;
         _miScreens.Text = "  当前屏幕：" + screens;
-        _miLid.Text = "  推断盖子状态：" + lid;
-        _miPolicy.Text = "  电源策略：" + QueryPolicyText(snap);
+        _miLid.Text = "  盖子状态：" + lid;
+        _miPolicy.Text = "  电源策略：" + QueryPolicyText(snap, policy);
+    }
+
+    /// <summary>悬停托盘提示：单行摘要（系统提示不支持多行，长度也有限）。</summary>
+    private static string BuildTrayTooltip(MonitorScanResult snap, (int Ac, int Dc, bool Ok) policy)
+    {
+        string screen = snap.State switch
+        {
+            ScreenState.ExternalOnly => "仅外接",
+            ScreenState.InternalOnly => "仅笔记本",
+            ScreenState.Extended => "扩展",
+            _ => "未知",
+        };
+        string lid = snap.Lid switch
+        {
+            LidState.Open => "盖子打开",
+            LidState.Closed => "盖子闭合",
+            _ => "盖子未知",
+        };
+
+        string policyText = DescribePolicyShort(snap, policy);
+        string text = $"{screen} · {lid} · {policyText}";
+        return text.Length > 60 ? text[..60] : text;
+    }
+
+    /// <summary>电源策略的短文本（读不到方案值时回落到当前状态对应的期望策略）。</summary>
+    private static string DescribePolicyShort(MonitorScanResult snap, (int Ac, int Dc, bool Ok) policy)
+    {
+        if (policy.Ok && policy.Ac == policy.Dc) return StateRules.DescribeLidValue(policy.Ac);
+        if (policy.Ok) return $"AC {StateRules.DescribeLidValue(policy.Ac)} / DC {StateRules.DescribeLidValue(policy.Dc)}";
+
+        var (expected, _) = StateRules.ExpectedPolicy(snap.State);
+        return expected is null ? "策略未知" : StateRules.DescribeLidValue(expected.Value);
+    }
+
+    /// <summary>电源策略行的颜色：读不到方案值时按“已下发/写入失败”区分。</summary>
+    private Color PolicyLineColor(MonitorScanResult snap, (int Ac, int Dc, bool Ok) policy)
+    {
+        if (policy.Ok && policy.Ac == policy.Dc) return UiTheme.PolicyColor(policy.Ac);
+        if (policy.Ok) return UiTheme.Gray;
+
+        if (_appliedLid == -2) return UiTheme.Red; // 写入失败（无权限/无合盖项）
+        var (expected, _) = StateRules.ExpectedPolicy(snap.State);
+        return expected is null ? UiTheme.Gray : UiTheme.PolicyColor(expected.Value);
     }
 
     /// <summary>切换“插上外接屏时”的行为并保存。</summary>
@@ -349,33 +417,42 @@ public sealed class MainForm : ApplicationContext
         _miPlugExtend.Checked = behavior == PlugBehavior.FixedExtend;
         _miPlugRemember.Checked = behavior == PlugBehavior.RememberLast;
 
+        _miPlugExternal.ForeColor = _miPlugExternal.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
+        _miPlugExtend.ForeColor = _miPlugExtend.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
+        _miPlugRemember.ForeColor = _miPlugRemember.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
+
         // 在“记住上次选择”上显示当前记录的是哪一种
         _miPlugRemember.Text = behavior == PlugBehavior.RememberLast
             ? $"记住上次选择（当前：{(PlugPolicy.LastMode == DisplaySwitcher.Mode.Extend ? "扩展" : "仅外接")}）"
             : "记住上次选择";
     }
 
+    /// <summary>勾选项的配色保持一致（开机自启动等）。</summary>
+    private void SyncMenuColors()
+    {
+        _miStartup.ForeColor = _miStartup.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
+    }
+
     /// <summary>
     /// 显示合盖电源策略：优先读电源方案真实值；
     /// 读不到（本机方案无合盖项 / 当前会话无权限）时，显示本程序正在管理的策略并标注写入状态。
     /// </summary>
-    private string QueryPolicyText(MonitorScanResult snap)
+    private string QueryPolicyText(MonitorScanResult snap, (int Ac, int Dc, bool Ok) policy)
     {
-        var (ac, dc, ok) = PowerManager.QueryLidAction();
-        if (ok)
+        if (policy.Ok)
         {
-            return ac == dc
-                ? StateRules.DescribeLidValue(ac)
-                : $"AC {StateRules.DescribeLidValue(ac)} / DC {StateRules.DescribeLidValue(dc)}";
+            return policy.Ac == policy.Dc
+                ? StateRules.DescribeLidValue(policy.Ac)
+                : $"AC {StateRules.DescribeLidValue(policy.Ac)} / DC {StateRules.DescribeLidValue(policy.Dc)}";
         }
 
         var (expected, _) = StateRules.ExpectedPolicy(snap.State);
         if (expected is null) return "未管理（屏幕状态未知）";
 
-        string policy = StateRules.DescribeLidValue(expected.Value);
-        if (_appliedLid == expected.Value) return policy + "（已下发）";
-        if (_appliedLid == -2) return policy + "（写入失败，需权限）";
-        return policy + "（待下发）";
+        string text = StateRules.DescribeLidValue(expected.Value);
+        if (_appliedLid == expected.Value) return text + "（已下发）";
+        if (_appliedLid == -2) return text + "（写入失败，需权限）";
+        return text + "（待下发）";
     }
 
     // ---------------- 手动操作 ----------------
@@ -519,6 +596,7 @@ public sealed class MainForm : ApplicationContext
             _syncingStartup = true;
             _miStartup.Checked = StartupManager.IsEnabled();
             _syncingStartup = false;
+            SyncMenuColors();
         }
         catch (Exception ex)
         {
@@ -549,6 +627,7 @@ public sealed class MainForm : ApplicationContext
         _syncingStartup = true;
         _miStartup.Checked = StartupManager.IsEnabled();
         _syncingStartup = false;
+        SyncMenuColors();
         TryBalloon("开机自启动任务操作失败（任务计划程序权限受限？），已恢复原状态。");
     }
 

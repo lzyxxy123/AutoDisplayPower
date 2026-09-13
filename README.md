@@ -46,6 +46,8 @@ AutoDisplayPower/
 │   ├── PlugPolicy.cs           # “插上外接屏时”的行为（固定/记住上次，注册表持久化）
 │   └── StartupManager.cs       # 开机自启动：任务计划程序 + Run 键兜底
 ├── Utils/
+│   ├── UiTheme.cs              # Fluent 浅色语义色板（状态→颜色映射）
+│   ├── ModernMenuRenderer.cs   # 现代浅色菜单渲染器（彩色对钩/只读行彩色文字）
 │   ├── Win32Display.cs         # P/Invoke：EnumDisplayDevices 枚举“活动”显示器
 │   ├── WmiQuery.cs             # 晚绑定 COM 查询 WMI（无需 System.Management）
 │   ├── DisplayTopology.cs      # P/Invoke：QueryDisplayConfig（本机不可用，仅保留调试）
@@ -100,6 +102,12 @@ dotnet build
 
 ## 使用说明
 
+- **界面风格**（参照 Microsoft Fluent Design 浅色语义色）：
+  - 状态行彩色显示：屏幕状态（仅外接=蓝 / 仅笔记本=青 / 扩展=紫）、盖子状态（打开=绿 / 闭合=琥珀）、
+    电源策略（不操作=蓝 / 睡眠=紫 / 写入失败=红）、未知=灰
+  - 菜单为浅色现代风格（自定义渲染器：淡蓝悬停、细边框、矢量彩色对钩）
+  - **托盘图标彩色并随屏幕状态变色**（仅外接=蓝 / 仅笔记本=青 / 扩展=紫 / 未知=灰）
+  - **鼠标悬停托盘图标**显示单行摘要：`仅外接 · 盖子打开 · 合盖不操作`（系统提示仅支持单行且长度有限）
 - 右键托盘图标可查看实时状态、手动切换「仅外接 / 仅笔记本 / 扩展」。
   **三个切换项会按“当前实际显示状态”打对钩**（未知状态时都不打勾）。
 - **「插上外接屏时」子菜单**（三选一，持久化保存）：

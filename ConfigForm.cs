@@ -25,6 +25,8 @@ public sealed class ConfigForm : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Microsoft YaHei UI", 9F);
+        BackColor = Color.White;
+        ForeColor = UiTheme.TextPrimary;
         ClientSize = new Size(440, 280);
 
         int y = 16;
@@ -35,7 +37,7 @@ public sealed class ConfigForm : Form
             Text = BuildDetectedText(),
             AutoSize = true,
             Location = new Point(15, y),
-            ForeColor = Color.DimGray,
+            ForeColor = UiTheme.Accent,
         };
         y += 28;
 
@@ -51,7 +53,7 @@ public sealed class ConfigForm : Form
             Text = "多个型号用逗号分隔；勾选下方选项后可不填",
             AutoSize = true,
             Location = new Point(120, y - 2),
-            ForeColor = Color.Gray,
+            ForeColor = UiTheme.TextSecondary,
         };
         y += 26;
 
