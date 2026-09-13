@@ -15,9 +15,12 @@
 | KG257S PLUS + ATNA40HQ01-0 | 不操作 (0) |
 | 其他（空 / 未知型号） | 保持现状，仅记日志 |
 
-**盖子开合状态**另由 `QueryDisplayConfig` 判定：内屏目标"物理可用(available)"→开盖；"已断开"→关盖。
-该 API 能区分"内屏物理断开（关盖）"与"内屏物理连接但未激活（开盖+仅外接）"，因此
-即使程序强制"仅外接"（切断内屏显示），仍能正确显示开/合盖；受限会话读取失败时保守显示"未知"。
+**盖子开合状态**由 WMI `root\wmi\WmiMonitorID` 判定（**零切换、不闪屏、不黑屏**）：
+该 WMI 类列出的是**"已连接"**的显示器（含未激活的内屏）——实测开盖时内屏在列表中（即使当前为
+"仅外接"模式），**关盖后内屏从列表消失**。因此：内屏在列表 → 开盖；不在列表 → 关盖；查询失败 → 未知。
+（曾尝试 `QueryDisplayConfig`，但它在本机固定返回 `ERROR_INVALID_PARAMETER`，故弃用。）
+为绕开本机无法访问 nuget.org 的限制，WMI 通过 Windows 自带的**晚绑定 COM**（`WbemScripting.SWbemLocator`）查询，
+取条目使用 `_NewEnum` 顺序枚举（`ExecQuery` 返回的集合不支持 `Item(index)` 随机访问）。
 
 显示模式自动切换（插拔时触发，会覆盖手动设置的扩展/复制）：
 
@@ -43,7 +46,8 @@ AutoDisplayPower/
 │   └── StartupManager.cs       # 开机自启动：任务计划程序 + Run 键兜底
 ├── Utils/
 │   ├── Win32Display.cs         # P/Invoke：EnumDisplayDevices 枚举“活动”显示器
-│   ├── DisplayTopology.cs      # P/Invoke：QueryDisplayConfig 判定开/合盖
+│   ├── WmiQuery.cs             # 晚绑定 COM 查询 WMI（无需 System.Management）
+│   ├── DisplayTopology.cs      # P/Invoke：QueryDisplayConfig（本机不可用，仅保留调试）
 │   ├── EdidHelper.cs           # 读取注册表 EDID，解析真实型号名(0xFC 描述符)
 │   ├── Logger.cs               # %LOCALAPPDATA%\AutoDisplayPower\app.log
 │   ├── AppSettings.cs          # HKCU\Software\AutoDisplayPower（含显示器型号配置）
@@ -82,9 +86,16 @@ dotnet build
 ```powershell
 .\publish\AutoDisplayPower.exe --check                 # 打印检测到的显示器与推断状态
 .\publish\AutoDisplayPower.exe --check --selftest-power # 额外以当前值原样回写，验证写权限
+.\publish\AutoDisplayPower.exe --topology              # 打印显示拓扑（调试用）
 ```
 
-报告同时写入 `%LOCALAPPDATA%\AutoDisplayPower\check-report.txt`。
+便捷脚本（双击即可）：
+
+- **`check.cmd`** — 运行 `--check` 并显示报告（含"盖子判据"）
+- **`diag.cmd`** — WMI/盖子检测通路诊断（对比晚绑定 COM 与 `Get-CimInstance`）
+- **`lidtest.cmd open|closed`** — 开盖/合盖两种状态下的系统信号对比（用于排查盖子检测）
+
+报告同时写入 `%LOCALAPPDATA%\AutoDisplayPower\check-report.txt`（UTF-8 带 BOM）。
 
 ## 使用说明
 
@@ -102,9 +113,9 @@ dotnet build
   若某台显示器供电关闭导致 EDID 不可读，会被当作“未知/已拔出”处理，属系统行为限制。
 - **指纹匹配说明**：程序按 EDID 实际型号名匹配。外接屏 EDID 名记为 `KG257S PLUS`（字母 S），
   与规格书文字 `KG2575 PLUS`（数字 5）不同，程序对两者均兼容；内屏为 `ATNA40HQ01-0`。
-- **盖子开合**：依赖 `QueryDisplayConfig` 判断内屏“物理可用”。在受限/虚拟显示会话（如远程桌面、
-  某些沙箱）该 API 可能返回 `ERROR_INVALID_PARAMETER`，此时保守显示“未知”，而非错误的“闭合”；
-  在普通 Windows 交互登录会话中可正确区分开/合。
+- **盖子开合**：由 WMI `WmiMonitorID`（"已连接"显示器列表）判定内屏是否在位，**零切换、不闪屏**。
+  若 WMI 查询失败（受限会话/权限），保守显示"未知"，而非错误的"闭合"。
+  可用 `diag.cmd` 诊断 WMI 通路，`check.cmd` 查看含"盖子判据"的完整自检报告。
 - 合盖瞬间的睡眠触发由系统完成：本程序在**状态变化后**立即改写策略，若机器长时间处于
   “仅内屏→合盖睡眠”策略下直接合盖，会按既有策略立即睡眠（符合预期）；接外接后再合盖则不会睡眠。
 - 合盖状态下拔掉外接屏不会立刻睡眠（需要再次合盖或系统超时），此为规格书状态机的自然结果。
