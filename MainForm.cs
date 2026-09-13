@@ -38,7 +38,8 @@ public sealed class MainForm : ApplicationContext
     private bool _syncingStartup;
     private bool _suppressBalloons = true;          // 启动首次对齐时不弹气球，避免开机骚扰
     private string? _lastApplyError;                // 上次下发失败信息（相同错误只记一次日志）
-    private DisplaySwitcher.Mode? _pendingSwitchMode; // 待汇总通知：本次切换到的显示模式
+    private DisplaySwitcher.Mode? _pendingSwitchMode; // 待汇总通知：本次成功切换到的显示模式
+    private string? _pendingSwitchFailure;            // 待汇总通知：本次切换失败提示
     private int? _pendingPolicyValue;                 // 待汇总通知：本次下发的合盖策略
     private string _lastCore = string.Empty;
 
@@ -132,15 +133,13 @@ public sealed class MainForm : ApplicationContext
             bool extAdded = _prev is { HasExternal: false } && snap.HasExternal;
             bool extRemoved = _prev is { HasExternal: true } && !snap.HasExternal;
 
-            if (extAdded) DoAutoSwitch(DisplaySwitcher.Mode.External);
-            else if (extRemoved) DoAutoSwitch(DisplaySwitcher.Mode.Internal);
+            // 自动切换后重新检测校验：未达到目标模式则记为失败（不再一律报“已切换”）
+            if (extAdded)
+                snap = ApplySwitch(DisplaySwitcher.Mode.External, "接入外接屏");
+            else if (extRemoved)
+                snap = ApplySwitch(DisplaySwitcher.Mode.Internal, "拔掉外接屏");
 
-            if (extAdded || extRemoved)
-            {
-                System.Threading.Thread.Sleep(1000); // 等待显示切换稳定后再扫描，避免读到中间态
-                snap = DisplayDetector.Scan();
-                if (!snap.Ok) snap = _prev ?? new MonitorScanResult();
-            }
+            if (!snap.Ok) snap = _prev ?? new MonitorScanResult(); // 校验期读取失败则沿用上次结果
 
             var prevState = _prev?.State;
             _prev = snap;
@@ -168,18 +167,74 @@ public sealed class MainForm : ApplicationContext
         }
     }
 
-    private void DoAutoSwitch(DisplaySwitcher.Mode mode)
+    /// <summary>
+    /// 执行显示模式切换，并在约 1 秒后【重新检测屏幕集合】校验是否真的达到目标模式。
+    /// 达到 → 记为待汇总的“成功切换”；未达到 → 记为“切换失败（附当前实际屏幕）”。
+    /// 返回切换校验后的扫描结果。
+    /// </summary>
+    private MonitorScanResult ApplySwitch(DisplaySwitcher.Mode mode, string reason)
     {
-        if (DisplaySwitcher.Switch(mode, out string? err))
+        if (!DisplaySwitcher.Switch(mode, out string? err))
         {
-            string action = mode == DisplaySwitcher.Mode.External ? "接入外接屏" : "拔掉外接屏";
-            Logger.Info($"{action} → 自动切换：{DisplaySwitcher.ModeText(mode)}");
-            _pendingSwitchMode = mode; // 不单独弹通知，汇总到本轮检测末尾统一弹一条
+            Logger.Error($"{reason} → 切换执行失败：{err}");
+            _pendingSwitchFailure = $"切换失败：{err}";
+            return DisplayDetector.Scan();
+        }
+
+        Logger.Info($"{reason} → 已执行切换：{DisplaySwitcher.ModeText(mode)}，正在校验…");
+        System.Threading.Thread.Sleep(1000); // 等待显示切换稳定后再检测，避免读到中间态
+
+        var after = DisplayDetector.Scan();
+        if (after.Ok && ModeAchieved(mode, after))
+        {
+            _pendingSwitchMode = mode;
+            Logger.Info($"切换校验通过：{DisplaySwitcher.ModeText(mode)}");
         }
         else
         {
-            Logger.Error($"自动切换显示模式失败：{err}");
+            _pendingSwitchFailure = BuildSwitchFailureText(mode, after);
+            Logger.Warn($"切换校验失败：{_pendingSwitchFailure}");
         }
+
+        return after;
+    }
+
+    /// <summary>校验目标显示模式是否真的达成（严格匹配：仅笔记本 / 仅外接 / 双屏扩展）。</summary>
+    private static bool ModeAchieved(DisplaySwitcher.Mode mode, MonitorScanResult snap) => mode switch
+    {
+        DisplaySwitcher.Mode.Internal => snap.State == ScreenState.InternalOnly,
+        DisplaySwitcher.Mode.External => snap.State == ScreenState.ExternalOnly,
+        _ => snap.State == ScreenState.Extended, // 扩展必须双屏同亮
+    };
+
+    /// <summary>生成切换失败提示，附带当前实际检测到的屏幕。</summary>
+    private static string BuildSwitchFailureText(DisplaySwitcher.Mode mode, MonitorScanResult snap)
+    {
+        if (!snap.Ok) return "切换失败：屏幕状态读取失败";
+
+        string current = snap.Monitors.Count == 0
+            ? "未检测到任何屏幕"
+            : string.Join("、", snap.Monitors.Select(m => m.ModelName).Distinct());
+
+        // 目标模式所需的屏幕是否在现场
+        bool needsInternal = mode != DisplaySwitcher.Mode.External;   // 仅笔记本 / 扩展
+        bool needsExternal = mode != DisplaySwitcher.Mode.Internal;   // 仅外接 / 扩展
+        bool missingInternal = needsInternal && !snap.HasInternal;
+        bool missingExternal = needsExternal && !snap.HasExternal;
+
+        if (missingInternal || missingExternal)
+        {
+            string missing = (missingInternal, missingExternal) switch
+            {
+                (true, true) => "外接屏幕与笔记本屏幕",
+                (true, false) => "笔记本屏幕",
+                _ => "外接屏幕",
+            };
+            return $"切换失败：未检测到{missing}（当前检测到：{current}）";
+        }
+
+        // 所需屏幕都在，但模式未生效（例如另一块屏无法关闭）
+        return $"切换失败：切换未生效（当前检测到：{current}）";
     }
 
     /// <summary>把当前状态对应的合盖策略应用到 AC/DC（只修改，不强制切换显示）。</summary>
@@ -289,34 +344,48 @@ public sealed class MainForm : ApplicationContext
     }
 
     /// <summary>
-    /// 把本次检测中发生的“显示切换”和“电源策略更新”汇总成【一条】气泡通知，
-    /// 例如：已切换为仅笔记本屏幕，电源策略为合盖睡眠。
+    /// 把本次检测中发生的“显示切换/切换失败”和“电源策略更新”汇总成【一条】气泡通知。
+    /// 成功示例：已切换为仅笔记本屏幕，电源策略为合盖睡眠
+    /// 失败示例：切换失败：未检测到笔记本屏幕（当前检测到：外接屏 (KG257S PLUS)）
     /// </summary>
     private void NotifyPendingChanges(MonitorScanResult snap)
     {
-        if (_pendingSwitchMode is null && _pendingPolicyValue is null) return;
+        if (_pendingSwitchMode is null && _pendingSwitchFailure is null && _pendingPolicyValue is null) return;
 
         if (_suppressBalloons)
         {
             // 启动首次对齐不打扰用户
             _pendingSwitchMode = null;
+            _pendingSwitchFailure = null;
             _pendingPolicyValue = null;
             return;
         }
 
-        // 策略部分：优先用本次实际下发的值；若只是切换了屏幕而策略未变，则用当前状态对应的策略
-        int? policyValue = _pendingPolicyValue;
-        if (policyValue is null && _pendingSwitchMode is not null)
-            policyValue = StateRules.ExpectedPolicy(snap.State).LidAction;
+        string text;
+        if (_pendingSwitchFailure is not null)
+        {
+            // 切换失败：以失败提示为主
+            text = _pendingSwitchFailure;
+            if (_pendingPolicyValue is { } failedPolicy)
+                text += $"，电源策略为{StateRules.DescribeLidValue(failedPolicy)}";
+        }
+        else
+        {
+            // 策略部分：优先用本次实际下发的值；若只切换了屏幕而策略未变，用当前状态对应的策略
+            int? policyValue = _pendingPolicyValue;
+            if (policyValue is null && _pendingSwitchMode is not null)
+                policyValue = StateRules.ExpectedPolicy(snap.State).LidAction;
 
-        string? switchPart = _pendingSwitchMode is { } m ? $"已切换为{ModeShortText(m)}屏幕" : null;
-        string? policyPart = policyValue is { } p ? $"电源策略为{StateRules.DescribeLidValue(p)}" : null;
+            string? switchPart = _pendingSwitchMode is { } m ? $"已切换为{ModeShortText(m)}屏幕" : null;
+            string? policyPart = policyValue is { } p ? $"电源策略为{StateRules.DescribeLidValue(p)}" : null;
 
-        string text = switchPart is not null && policyPart is not null
-            ? $"{switchPart}，{policyPart}"
-            : switchPart ?? policyPart!;
+            text = switchPart is not null && policyPart is not null
+                ? $"{switchPart}，{policyPart}"
+                : switchPart ?? policyPart!;
+        }
 
         _pendingSwitchMode = null;
+        _pendingSwitchFailure = null;
         _pendingPolicyValue = null;
         TryBalloon(text);
     }
@@ -330,16 +399,24 @@ public sealed class MainForm : ApplicationContext
 
     private void ManualSwitch(DisplaySwitcher.Mode mode)
     {
-        if (DisplaySwitcher.Switch(mode, out string? err))
+        try
         {
-            Logger.Info($"手动切换：{DisplaySwitcher.ModeText(mode)}");
-            _pendingSwitchMode = mode; // 汇总为一条通知（随后的事件/轮询会补上策略部分）
+            // 执行切换并校验实际结果（约1秒），再统一弹一条通知
+            var after = ApplySwitch(mode, "手动切换");
+            if (after.Ok)
+            {
+                _prev = after;
+                _current = after;
+            }
             _lastCore = string.Empty;
+            AlignPolicy(after);
+            UpdateStatusFrom(after);
+            NotifyPendingChanges(after);
         }
-        else
+        catch (Exception ex)
         {
-            Logger.Error($"手动切换失败：{err}");
-            TryBalloon($"切换失败：{err}");
+            Logger.Error("手动切换异常", ex);
+            TryBalloon($"切换失败：{ex.Message}");
         }
     }
 
