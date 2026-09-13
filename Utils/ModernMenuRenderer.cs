@@ -56,6 +56,42 @@ internal sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
         RoundedEdges = false;
     }
 
+    /// <summary>
+    /// 绘制菜单背景时顺带画“滑动开关”。
+    /// 说明：实测 OnRenderMenuItemBackground 对未选中项不会被调用，OnRenderItemImage 的绘图区
+    /// 又被裁剪在图标范围内，都不适合画开关；OnRenderToolStripBackground 拿到的是整个菜单表面、
+    /// 无裁剪，最可靠。
+    /// </summary>
+    protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+    {
+        base.OnRenderToolStripBackground(e);
+
+        foreach (ToolStripItem item in e.ToolStrip.Items)
+        {
+            if ((item.Tag as string) == MenuTag.Switch)
+                DrawSwitch(e.Graphics, item.Bounds, IsChecked(item));
+        }
+    }
+
+    /// <summary>
+    /// 图标绘制：不做“禁用变灰”——状态行是只读(禁用)项，但图标必须保持彩色
+    /// （WinForms 默认渲染器会把禁用项的图标灰度化）。
+    /// </summary>
+    protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
+    {
+        if (e.Image is null) return;
+
+        Graphics g = e.Graphics;
+        Rectangle r = e.ImageRectangle;
+        if (r.Width <= 0 || r.Height <= 0)
+            r = new Rectangle(e.Item.ContentRectangle.Left + 4, e.Item.ContentRectangle.Top, 16, 16);
+
+        SmoothingMode old = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.DrawImage(e.Image, r);
+        g.SmoothingMode = old;
+    }
+
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
         if (!e.Item.Enabled)

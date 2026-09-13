@@ -113,6 +113,110 @@ public static class CheckMode
         foreach (string f in files) Console.WriteLine("样张：" + f);
     }
 
+    /// <summary>
+    /// 调试：真实构建一个与托盘菜单同构的 ContextMenuStrip（同样的渲染器/Tag/图标），
+    /// 离屏显示后绘制成 PNG —— 用于验证“实际绘制结果”（滑块、对钩、高亮是否真的画出来）。
+    /// </summary>
+    public static void DumpUiPreview()
+    {
+        MenuIconFactory.Configure(16);
+
+        var menu = new System.Windows.Forms.ContextMenuStrip
+        {
+            Renderer = new ModernMenuRenderer(),
+            ImageScalingSize = new Size(16, 16),
+        };
+
+        System.Windows.Forms.ToolStripMenuItem Make(string text, Image? img, string? tag = null)
+            => new(text) { Enabled = tag is not null, ForeColor = UiTheme.TextPrimary, Image = img, ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None, Tag = tag };
+
+        menu.Items.Add(Make("状态", MenuIconFactory.EmptyRow()));
+        menu.Items.Add(Make("当前屏幕：外接屏 (KG257S PLUS)", MenuIconFactory.ScreenRow(ScreenState.ExternalOnly)));
+        menu.Items.Add(Make("盖子状态：打开", MenuIconFactory.LidRow(LidState.Open)));
+        menu.Items.Add(Make("电源策略：合盖不操作（已下发）", MenuIconFactory.PolicyRow(0, false)));
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        var miExternal = Make("仅外接", MenuIconFactory.ModeRow(DisplaySwitcher.Mode.External, true), MenuTag.Mode);
+        var miInternal = Make("仅笔记本", MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Internal, false), MenuTag.Mode);
+        var miExtend = Make("扩展", MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Extend, false), MenuTag.Mode);
+        menu.Items.Add(miExternal);
+        menu.Items.Add(miInternal);
+        menu.Items.Add(miExtend);
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        menu.Items.Add(Make("插上外接屏时", MenuIconFactory.Row("row-plug", MenuIconFactory.PlugArrow(), false)));
+        menu.Items.Add(Make("界面主题", MenuIconFactory.Row("row-palette", MenuIconFactory.Palette(), false)));
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        var miStartup = Make("开机自启动", MenuIconFactory.Row("row-power", MenuIconFactory.Power(), false), MenuTag.Switch);
+        miStartup.CheckOnClick = true;
+        miStartup.Checked = true;
+        menu.Items.Add(miStartup);
+        menu.Items.Add(Make("显示器型号配置…", MenuIconFactory.Row("row-settings", MenuIconFactory.Settings(), false)));
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add(Make("退出", MenuIconFactory.EmptyRow()));
+
+        // 子菜单预览：界面主题（验证子菜单里的对钩）
+        var sub = new System.Windows.Forms.ContextMenuStrip
+        {
+            Renderer = new ModernMenuRenderer(),
+            ImageScalingSize = new Size(16, 16),
+        };
+        int idx = 0;
+        foreach (Theme theme in ThemeCatalog.All)
+        {
+            bool selected = theme.Key == UiTheme.CurrentKey;
+            var item = new System.Windows.Forms.ToolStripMenuItem(theme.Name)
+            {
+                Enabled = true,
+                ForeColor = UiTheme.TextPrimary,
+                ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None,
+                Tag = MenuTag.Mode,
+                Image = MenuIconFactory.Row($"theme-{theme.Key}", MenuIconFactory.Swatch(theme.Key, theme.Accent), selected),
+                Font = selected ? new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) : null,
+            };
+            sub.Items.Add(item);
+            idx++;
+        }
+
+        string path = Path.Combine(AppContext.BaseDirectory, "ui-preview.png");
+        string subPath = Path.Combine(AppContext.BaseDirectory, "ui-preview-sub.png");
+        try
+        {
+            SaveMenu(menu, path);
+            SaveMenu(sub, subPath);
+            Console.WriteLine($"UI 预览：{path}");
+            Console.WriteLine($"UI 子菜单预览：{subPath}  (共 {idx} 项)");
+        }
+        finally
+        {
+            menu.Close();
+            menu.Dispose();
+            sub.Close();
+            sub.Dispose();
+        }
+    }
+
+    /// <summary>把菜单离屏显示后渲染成 2 倍 PNG。</summary>
+    private static void SaveMenu(System.Windows.Forms.ContextMenuStrip menu, string path)
+    {
+        menu.Opacity = 0.01; // 几乎不可见，避免闪现
+        menu.Show(new Point(-4000, -4000));
+        System.Windows.Forms.Application.DoEvents();
+
+        using var bmp = new Bitmap(Math.Max(1, menu.Width), Math.Max(1, menu.Height));
+        menu.DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
+        using var big = new Bitmap(bmp.Width * 2, bmp.Height * 2);
+        using (var g = Graphics.FromImage(big))
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.DrawImage(bmp, new Rectangle(0, 0, big.Width, big.Height));
+        }
+
+        big.Save(path, ImageFormat.Png);
+    }
+
     public static void Run(bool selfTestPower)
     {
         var sb = new StringBuilder();

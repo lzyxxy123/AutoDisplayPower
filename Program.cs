@@ -20,6 +20,14 @@ internal static class Program
         bool topologyMode = Array.IndexOf(args, "--topology") >= 0;
         bool iconMode = Array.IndexOf(args, "--icons") >= 0;
         bool mockupMode = Array.IndexOf(args, "--mockup") >= 0;
+        bool uiMode = Array.IndexOf(args, "--uipreview") >= 0;
+
+        if (uiMode)
+        {
+            Application.EnableVisualStyles();
+            CheckMode.DumpUiPreview();
+            return;
+        }
 
         if (mockupMode)
         {
