@@ -25,6 +25,10 @@ public sealed class MainForm : ApplicationContext
     private readonly ToolStripMenuItem _miExternal;
     private readonly ToolStripMenuItem _miInternal;
     private readonly ToolStripMenuItem _miExtend;
+    private readonly ToolStripMenuItem _miPlugMenu;
+    private readonly ToolStripMenuItem _miPlugExternal;
+    private readonly ToolStripMenuItem _miPlugExtend;
+    private readonly ToolStripMenuItem _miPlugRemember;
     private readonly ToolStripMenuItem _miStartup;
     private readonly ToolStripMenuItem _miConfigDisplay;
     private readonly System.Windows.Forms.Timer _pollTimer;
@@ -58,6 +62,17 @@ public sealed class MainForm : ApplicationContext
         _miExternal = new ToolStripMenuItem("🖥️ 仅外接");
         _miInternal = new ToolStripMenuItem("💻 仅笔记本");
         _miExtend = new ToolStripMenuItem("🔄 扩展");
+
+        // “插上外接屏时”子菜单（三选一）
+        _miPlugExternal = new ToolStripMenuItem("始终「仅外接」");
+        _miPlugExtend = new ToolStripMenuItem("始终「扩展」");
+        _miPlugRemember = new ToolStripMenuItem("记住上次选择");
+        _miPlugMenu = new ToolStripMenuItem("插上外接屏时");
+        _miPlugMenu.DropDownItems.Add(_miPlugExternal);
+        _miPlugMenu.DropDownItems.Add(_miPlugExtend);
+        _miPlugMenu.DropDownItems.Add(new ToolStripSeparator());
+        _miPlugMenu.DropDownItems.Add(_miPlugRemember);
+
         _miStartup = new ToolStripMenuItem("开机自启动") { CheckOnClick = true };
         _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…");
 
@@ -70,6 +85,8 @@ public sealed class MainForm : ApplicationContext
         _menu.Items.Add(_miExternal);
         _menu.Items.Add(_miInternal);
         _menu.Items.Add(_miExtend);
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(_miPlugMenu);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_miStartup);
         _menu.Items.Add(_miConfigDisplay);
@@ -85,6 +102,11 @@ public sealed class MainForm : ApplicationContext
         _miExtend.Click += (_, _) => ManualSwitch(DisplaySwitcher.Mode.Extend);
         _miStartup.CheckedChanged += (_, _) => OnStartupToggle();
         _miConfigDisplay.Click += (_, _) => OpenConfig();
+
+        _miPlugExternal.Click += (_, _) => SetPlugBehavior(PlugBehavior.FixedExternal);
+        _miPlugExtend.Click += (_, _) => SetPlugBehavior(PlugBehavior.FixedExtend);
+        _miPlugRemember.Click += (_, _) => SetPlugBehavior(PlugBehavior.RememberLast);
+        RefreshPlugMenu();
 
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
@@ -135,9 +157,15 @@ public sealed class MainForm : ApplicationContext
 
             // 自动切换后重新检测校验：未达到目标模式则记为失败（不再一律报“已切换”）
             if (extAdded)
-                snap = ApplySwitch(DisplaySwitcher.Mode.External, "接入外接屏");
+            {
+                // 插上外接屏时的模式：始终「仅外接」/ 始终「扩展」/ 记住上次选择
+                DisplaySwitcher.Mode plugMode = PlugPolicy.ResolvePlugMode();
+                snap = ApplySwitch(plugMode, $"接入外接屏（{PlugPolicy.DescribeBehavior()}）");
+            }
             else if (extRemoved)
+            {
                 snap = ApplySwitch(DisplaySwitcher.Mode.Internal, "拔掉外接屏");
+            }
 
             if (!snap.Ok) snap = _prev ?? new MonitorScanResult(); // 校验期读取失败则沿用上次结果
 
@@ -287,6 +315,11 @@ public sealed class MainForm : ApplicationContext
     {
         if (!snap.Ok) return;
 
+        // 三个切换项的对钩：按【当前实际显示状态】打勾（未知则都不打勾）
+        _miExternal.Checked = snap.State == ScreenState.ExternalOnly;
+        _miInternal.Checked = snap.State == ScreenState.InternalOnly;
+        _miExtend.Checked = snap.State == ScreenState.Extended;
+
         string screens = snap.Monitors.Count == 0
             ? "未检测到显示器"
             : string.Join("、", snap.Monitors.Select(m => m.ModelName).Distinct());
@@ -298,6 +331,28 @@ public sealed class MainForm : ApplicationContext
         _miScreens.Text = "  当前屏幕：" + screens;
         _miLid.Text = "  推断盖子状态：" + lid;
         _miPolicy.Text = "  电源策略：" + QueryPolicyText(snap);
+    }
+
+    /// <summary>切换“插上外接屏时”的行为并保存。</summary>
+    private void SetPlugBehavior(PlugBehavior behavior)
+    {
+        PlugPolicy.Behavior = behavior;
+        RefreshPlugMenu();
+        Logger.Info($"插上外接屏时的行为已设为：{PlugPolicy.DescribeBehavior()}");
+    }
+
+    /// <summary>刷新“插上外接屏时”子菜单的单选对钩。</summary>
+    private void RefreshPlugMenu()
+    {
+        PlugBehavior behavior = PlugPolicy.Behavior;
+        _miPlugExternal.Checked = behavior == PlugBehavior.FixedExternal;
+        _miPlugExtend.Checked = behavior == PlugBehavior.FixedExtend;
+        _miPlugRemember.Checked = behavior == PlugBehavior.RememberLast;
+
+        // 在“记住上次选择”上显示当前记录的是哪一种
+        _miPlugRemember.Text = behavior == PlugBehavior.RememberLast
+            ? $"记住上次选择（当前：{(PlugPolicy.LastMode == DisplaySwitcher.Mode.Extend ? "扩展" : "仅外接")}）"
+            : "记住上次选择";
     }
 
     /// <summary>
@@ -407,6 +462,13 @@ public sealed class MainForm : ApplicationContext
             {
                 _prev = after;
                 _current = after;
+
+                // 记录“上次选择”：仅当外接屏在场、且切换成功，且选的是「仅外接/扩展」
+                if (after.HasExternal && ModeAchieved(mode, after))
+                {
+                    PlugPolicy.RememberChoice(mode);
+                    RefreshPlugMenu();
+                }
             }
             _lastCore = string.Empty;
             AlignPolicy(after);
