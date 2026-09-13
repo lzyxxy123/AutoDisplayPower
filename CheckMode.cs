@@ -106,6 +106,13 @@ public static class CheckMode
         Console.WriteLine("图标预览已生成：" + path);
     }
 
+    /// <summary>调试：渲染几套菜单风格样张，供确认配色。</summary>
+    public static void DumpMockups()
+    {
+        var files = MockupRenderer.RenderAll(AppContext.BaseDirectory);
+        foreach (string f in files) Console.WriteLine("样张：" + f);
+    }
+
     public static void Run(bool selfTestPower)
     {
         var sb = new StringBuilder();

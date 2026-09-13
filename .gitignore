@@ -41,6 +41,11 @@
 # 盖子检测对比测试的输出文件
 lidtest-*.txt
 
+# UI 样张/预览图（可随时用 --mockup / --icons 重新生成）
+风格样张-*.png
+mockup-*.png
+icons-preview.png
+
 # Windows 系统隐藏文件
 Thumbs.db
 Desktop.ini
