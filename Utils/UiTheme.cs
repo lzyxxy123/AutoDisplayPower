@@ -15,6 +15,9 @@ internal static class UiTheme
     public static readonly Color MenuBorder = Color.FromArgb(0xE1, 0xE1, 0xE1);    // 菜单边框/分隔线
     public static readonly Color Hover = Color.FromArgb(0xEE, 0xF4, 0xFB);         // 悬停高亮（淡蓝）
     public static readonly Color HoverBorder = Color.FromArgb(0xCF, 0xE3, 0xF7);
+    public static readonly Color Pill = Color.FromArgb(0xE9, 0xF2, 0xFC);          // 当前模式：整行浅色药丸
+    public static readonly Color PillStrong = Color.FromArgb(0xDC, 0xEC, 0xFA);    // 策略变化：强调底色
+    public static readonly Color SwitchOff = Color.FromArgb(0xC8, 0xC6, 0xC4);     // 开关关闭轨道
 
     // ---- Fluent 语义色 ----
     public static readonly Color Accent = Color.FromArgb(0x00, 0x78, 0xD4); // 蓝（communication blue）

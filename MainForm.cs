@@ -33,6 +33,8 @@ public sealed class MainForm : ApplicationContext
     private readonly ToolStripMenuItem _miStartup;
     private readonly ToolStripMenuItem _miConfigDisplay;
     private readonly System.Windows.Forms.Timer _pollTimer;
+    private readonly System.Windows.Forms.Timer _emphasisTimer; // 策略变化后的短暂强调
+    private readonly Font _policyBoldFont;
     private readonly object _gate = new();
 
     private MonitorScanResult? _prev;               // 上一次成功扫描结果（用于判定插拔）
@@ -47,6 +49,8 @@ public sealed class MainForm : ApplicationContext
     private string? _pendingSwitchFailure;            // 待汇总通知：本次切换失败提示
     private int? _pendingPolicyValue;                 // 待汇总通知：本次下发的合盖策略
     private string _lastCore = string.Empty;
+    private string _lastPolicyText = string.Empty;     // 上次显示的电源策略文本（用于检测变化）
+    private bool _policyEmphasizing;                   // 策略刚变化，正在强调显示
 
     public MainForm()
     {
@@ -57,28 +61,52 @@ public sealed class MainForm : ApplicationContext
             Visible = true,
         };
 
-        _miStatusTitle = new ToolStripMenuItem("📊 状态") { Enabled = false, ForeColor = UiTheme.TextSecondary };
-        _miScreens = new ToolStripMenuItem("  当前屏幕：—") { Enabled = false, ForeColor = UiTheme.TextSecondary };
-        _miLid = new ToolStripMenuItem("  盖子状态：—") { Enabled = false, ForeColor = UiTheme.TextSecondary };
-        _miPolicy = new ToolStripMenuItem("  电源策略：—") { Enabled = false, ForeColor = UiTheme.TextSecondary };
-        _miExternal = new ToolStripMenuItem("🖥️ 仅外接");
-        _miInternal = new ToolStripMenuItem("💻 仅笔记本");
-        _miExtend = new ToolStripMenuItem("🔄 扩展");
+        // 先建菜单，按实际 DPI 生成彩色矢量图标
+        _menu = new ContextMenuStrip { Renderer = new ModernMenuRenderer() };
+        int iconSize = Math.Max(16, (int)Math.Round(16.0 * _menu.DeviceDpi / 96.0));
+        MenuIconFactory.Configure(iconSize);
+        _menu.ImageScalingSize = new Size(iconSize, iconSize);
+        _policyBoldFont = new Font(_menu.Font, FontStyle.Bold);
 
-        // “插上外接屏时”子菜单（三选一）
-        _miPlugExternal = new ToolStripMenuItem("始终「仅外接」");
-        _miPlugExtend = new ToolStripMenuItem("始终「扩展」");
-        _miPlugRemember = new ToolStripMenuItem("记住上次选择");
-        _miPlugMenu = new ToolStripMenuItem("插上外接屏时");
+        _miStatusTitle = new ToolStripMenuItem("状态")
+        {
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Font = _policyBoldFont, Image = MenuIconFactory.Blank(),
+        };
+        _miScreens = new ToolStripMenuItem("当前屏幕：—")
+        {
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.ScreenIcon(ScreenState.Unknown),
+        };
+        _miLid = new ToolStripMenuItem("盖子状态：—")
+        {
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.LidIcon(LidState.Unknown),
+        };
+        _miPolicy = new ToolStripMenuItem("电源策略：—")
+        {
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.PolicyIcon(null, false),
+        };
+
+        // 三个模式项：图标彩色；当前模式用“整行浅色高亮”表示（Tag=Mode，不画对钩）
+        _miExternal = new ToolStripMenuItem("仅外接") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeExternal() };
+        _miInternal = new ToolStripMenuItem("仅笔记本") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeInternal() };
+        _miExtend = new ToolStripMenuItem("扩展") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeExtend() };
+
+        // “插上外接屏时”子菜单（三选一，选中项同样整行高亮）
+        _miPlugExternal = new ToolStripMenuItem("始终「仅外接」") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeExternal() };
+        _miPlugExtend = new ToolStripMenuItem("始终「扩展」") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeExtend() };
+        _miPlugRemember = new ToolStripMenuItem("记住上次选择") { Tag = MenuTag.Mode, Image = MenuIconFactory.History() };
+        _miPlugMenu = new ToolStripMenuItem("插上外接屏时") { Image = MenuIconFactory.PlugArrow() };
         _miPlugMenu.DropDownItems.Add(_miPlugExternal);
         _miPlugMenu.DropDownItems.Add(_miPlugExtend);
         _miPlugMenu.DropDownItems.Add(new ToolStripSeparator());
         _miPlugMenu.DropDownItems.Add(_miPlugRemember);
 
-        _miStartup = new ToolStripMenuItem("开机自启动") { CheckOnClick = true };
-        _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…");
+        // 开机自启动：右侧滑动开关
+        _miStartup = new ToolStripMenuItem("开机自启动")
+        {
+            CheckOnClick = true, Tag = MenuTag.Switch, Image = MenuIconFactory.Power(),
+        };
+        _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…") { Image = MenuIconFactory.Settings() };
 
-        _menu = new ContextMenuStrip { Renderer = new ModernMenuRenderer() };
         _menu.Items.Add(_miStatusTitle);
         _menu.Items.Add(_miScreens);
         _menu.Items.Add(_miLid);
@@ -93,7 +121,14 @@ public sealed class MainForm : ApplicationContext
         _menu.Items.Add(_miStartup);
         _menu.Items.Add(_miConfigDisplay);
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(new ToolStripMenuItem("退出", null, (_, _) => Application.Exit()));
+        _menu.Items.Add(new ToolStripMenuItem("退出", null, (_, _) => Application.Exit()) { Image = MenuIconFactory.Blank() });
+
+        // 所有项都不缩放图标，并统一用近黑文字（彩色语义交给图标）
+        foreach (ToolStripItem item in AllMenuItems())
+        {
+            item.ImageScaling = ToolStripItemImageScaling.None;
+            if (item is ToolStripMenuItem menuItem) menuItem.ForeColor = UiTheme.TextPrimary;
+        }
 
         _tray.ContextMenuStrip = _menu;
         _tray.DoubleClick += OnTrayDoubleClick;
@@ -116,6 +151,9 @@ public sealed class MainForm : ApplicationContext
         RefreshPlugMenu();
 
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+
+        _emphasisTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+        _emphasisTimer.Tick += (_, _) => EndPolicyEmphasis();
 
         _pollTimer = new System.Windows.Forms.Timer { Interval = PollIntervalNormalMs };
         _pollTimer.Tick += OnTimerTick;
@@ -322,13 +360,10 @@ public sealed class MainForm : ApplicationContext
     {
         if (!snap.Ok) return;
 
-        // 三个切换项的对钩：按【当前实际显示状态】打勾（未知则都不打勾），并对勾项用语义色
+        // 三个模式项：当前模式用“整行浅色高亮”表示（Checked 仅作状态标记，渲染器不画对钩）
         _miExternal.Checked = snap.State == ScreenState.ExternalOnly;
         _miInternal.Checked = snap.State == ScreenState.InternalOnly;
         _miExtend.Checked = snap.State == ScreenState.Extended;
-        _miExternal.ForeColor = _miExternal.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
-        _miInternal.ForeColor = _miInternal.Checked ? UiTheme.Teal : UiTheme.TextPrimary;
-        _miExtend.ForeColor = _miExtend.Checked ? UiTheme.Purple : UiTheme.TextPrimary;
 
         // 托盘图标颜色随屏幕状态变化
         _tray.Icon = TrayIconFactory.GetStateIcon(snap.State);
@@ -338,24 +373,66 @@ public sealed class MainForm : ApplicationContext
             : string.Join("、", snap.Monitors.Select(m => m.ModelName).Distinct());
         string lid = StateRules.LidText(snap.Lid);
 
-        // 电源方案值只查询一次，供 策略行配色 / 悬停提示 / 策略文本 复用（避免重复启动 powercfg）
+        // 电源方案值只查询一次，供 策略图标 / 悬停提示 / 策略文本 复用（避免重复启动 powercfg）
         var policy = PowerManager.QueryLidAction();
 
-        // 状态行配色（由自定义渲染器保证只读项也显示该颜色）
-        _miScreens.ForeColor = UiTheme.ScreenStateColor(snap.State);
-        _miLid.ForeColor = UiTheme.LidColor(snap.Lid);
-        _miPolicy.ForeColor = PolicyLineColor(snap, policy);
+        // 状态行图标随状态变色（文字统一近黑，语义交给图标）
+        _miScreens.Image = MenuIconFactory.ScreenIcon(snap.State);
+        _miLid.Image = MenuIconFactory.LidIcon(snap.Lid);
+        _miPolicy.Image = MenuIconFactory.PolicyIcon(ResolvePolicyIconValue(snap, policy), IsPolicyWriteFailed(policy));
 
         // 悬停托盘图标时显示的单行摘要（含 屏幕 / 盖子 / 电源策略）
         _tray.Text = BuildTrayTooltip(snap, policy);
+
+        // 电源策略文本变化 → 短暂强调（加粗 + 浅色高亮 + “已更新”）
+        string policyText = QueryPolicyText(snap, policy);
+        if (policyText != _lastPolicyText)
+        {
+            _lastPolicyText = policyText;
+            BeginPolicyEmphasis();
+        }
+        _miPolicy.Text = "电源策略：" + policyText + (_policyEmphasizing ? "（已更新）" : "");
 
         string core = $"{snap.State}|{screens}|{lid}";
         if (core == _lastCore) return;
 
         _lastCore = core;
-        _miScreens.Text = "  当前屏幕：" + screens;
-        _miLid.Text = "  盖子状态：" + lid;
-        _miPolicy.Text = "  电源策略：" + QueryPolicyText(snap, policy);
+        _miScreens.Text = "当前屏幕：" + screens;
+        _miLid.Text = "盖子状态：" + lid;
+    }
+
+    /// <summary>策略图标用值：优先真实方案值，读不到则用当前状态对应的期望值。</summary>
+    private static int? ResolvePolicyIconValue(MonitorScanResult snap, (int Ac, int Dc, bool Ok) policy)
+    {
+        if (policy.Ok) return policy.Ac == policy.Dc ? policy.Ac : null;
+        return StateRules.ExpectedPolicy(snap.State).LidAction;
+    }
+
+    /// <summary>是否处于“下发失败”状态（无权限/本机方案无合盖项）。</summary>
+    private bool IsPolicyWriteFailed((int Ac, int Dc, bool Ok) policy)
+        => !policy.Ok && _appliedLid == -2;
+
+    /// <summary>策略变化：加粗 + 浅色高亮，3 秒后恢复。</summary>
+    private void BeginPolicyEmphasis()
+    {
+        if (_suppressBalloons) return; // 启动首次对齐不强调
+
+        _policyEmphasizing = true;
+        _miPolicy.Tag = MenuTag.Emphasize;
+        _miPolicy.Font = _policyBoldFont;
+        _emphasisTimer.Stop();
+        _emphasisTimer.Start();
+        _menu.Invalidate();
+    }
+
+    private void EndPolicyEmphasis()
+    {
+        _emphasisTimer.Stop();
+        _policyEmphasizing = false;
+        _miPolicy.Tag = null;
+        _miPolicy.Font = null; // 恢复默认字体
+        _miPolicy.Text = "电源策略：" + _lastPolicyText;
+        _menu.Invalidate();
     }
 
     /// <summary>悬停托盘提示：单行摘要（系统提示不支持多行，长度也有限）。</summary>
@@ -390,17 +467,6 @@ public sealed class MainForm : ApplicationContext
         return expected is null ? "策略未知" : StateRules.DescribeLidValue(expected.Value);
     }
 
-    /// <summary>电源策略行的颜色：读不到方案值时按“已下发/写入失败”区分。</summary>
-    private Color PolicyLineColor(MonitorScanResult snap, (int Ac, int Dc, bool Ok) policy)
-    {
-        if (policy.Ok && policy.Ac == policy.Dc) return UiTheme.PolicyColor(policy.Ac);
-        if (policy.Ok) return UiTheme.Gray;
-
-        if (_appliedLid == -2) return UiTheme.Red; // 写入失败（无权限/无合盖项）
-        var (expected, _) = StateRules.ExpectedPolicy(snap.State);
-        return expected is null ? UiTheme.Gray : UiTheme.PolicyColor(expected.Value);
-    }
-
     /// <summary>切换“插上外接屏时”的行为并保存。</summary>
     private void SetPlugBehavior(PlugBehavior behavior)
     {
@@ -409,7 +475,7 @@ public sealed class MainForm : ApplicationContext
         Logger.Info($"插上外接屏时的行为已设为：{PlugPolicy.DescribeBehavior()}");
     }
 
-    /// <summary>刷新“插上外接屏时”子菜单的单选对钩。</summary>
+    /// <summary>刷新“插上外接屏时”子菜单的选中项（选中项由渲染器画整行浅色高亮）。</summary>
     private void RefreshPlugMenu()
     {
         PlugBehavior behavior = PlugPolicy.Behavior;
@@ -417,20 +483,23 @@ public sealed class MainForm : ApplicationContext
         _miPlugExtend.Checked = behavior == PlugBehavior.FixedExtend;
         _miPlugRemember.Checked = behavior == PlugBehavior.RememberLast;
 
-        _miPlugExternal.ForeColor = _miPlugExternal.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
-        _miPlugExtend.ForeColor = _miPlugExtend.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
-        _miPlugRemember.ForeColor = _miPlugRemember.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
-
         // 在“记住上次选择”上显示当前记录的是哪一种
         _miPlugRemember.Text = behavior == PlugBehavior.RememberLast
             ? $"记住上次选择（当前：{(PlugPolicy.LastMode == DisplaySwitcher.Mode.Extend ? "扩展" : "仅外接")}）"
             : "记住上次选择";
     }
 
-    /// <summary>勾选项的配色保持一致（开机自启动等）。</summary>
+    /// <summary>遍历主菜单与子菜单的全部项。</summary>
+    private IEnumerable<ToolStripItem> AllMenuItems()
+    {
+        foreach (ToolStripItem item in _menu.Items) yield return item;
+        foreach (ToolStripItem item in _miPlugMenu.DropDownItems) yield return item;
+    }
+
+    /// <summary>开机自启动的开关状态由滑动开关呈现，文字保持近黑。</summary>
     private void SyncMenuColors()
     {
-        _miStartup.ForeColor = _miStartup.Checked ? UiTheme.Accent : UiTheme.TextPrimary;
+        _miStartup.ForeColor = UiTheme.TextPrimary;
     }
 
     /// <summary>

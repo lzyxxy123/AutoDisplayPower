@@ -1,4 +1,7 @@
 using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Text;
 using AutoDisplayPower.Services;
@@ -49,6 +52,58 @@ public static class CheckMode
             File.WriteAllText(Path.Combine(dir, "topology-report.txt"), sb.ToString(), new UTF8Encoding(false));
         }
         catch { }
+    }
+
+    /// <summary>调试：把所有菜单图标渲染成 PNG 预览图（放大 5 倍便于查看）。</summary>
+    public static void DumpIcons()
+    {
+        MenuIconFactory.Configure(16);
+
+        var items = new (string Name, Image Img)[]
+        {
+            ("仅外接", MenuIconFactory.ModeExternal()),
+            ("仅笔记本", MenuIconFactory.ModeInternal()),
+            ("扩展", MenuIconFactory.ModeExtend()),
+            ("盖子-打开", MenuIconFactory.LidIcon(LidState.Open)),
+            ("盖子-闭合", MenuIconFactory.LidIcon(LidState.Closed)),
+            ("盖子-未知", MenuIconFactory.LidIcon(LidState.Unknown)),
+            ("策略-不操作", MenuIconFactory.PolicyIcon(0, false)),
+            ("策略-睡眠", MenuIconFactory.PolicyIcon(1, false)),
+            ("策略-关机", MenuIconFactory.PolicyIcon(3, false)),
+            ("策略-写入失败", MenuIconFactory.PolicyIcon(null, true)),
+            ("策略-未知", MenuIconFactory.PolicyIcon(null, false)),
+            ("电源(自启动)", MenuIconFactory.Power()),
+            ("设置", MenuIconFactory.Settings()),
+            ("插上外接屏时", MenuIconFactory.PlugArrow()),
+            ("记住上次", MenuIconFactory.History()),
+        };
+
+        const int scale = 5;
+        const int cols = 5;
+        int cell = 16 * scale + 16;
+        int rows = (items.Length + cols - 1) / cols;
+
+        using var bmp = new Bitmap(cols * cell, rows * (cell + 24) + 8);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.FromArgb(0xFB, 0xFB, 0xFB));
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            using var font = new Font("Microsoft YaHei UI", 9f);
+            using var textBrush = new SolidBrush(Color.FromArgb(0x1B, 0x1B, 0x1B));
+
+            for (int i = 0; i < items.Length; i++)
+            {
+                int cx = (i % cols) * cell + 8;
+                int cy = (i / cols) * (cell + 24) + 8;
+                g.DrawImage(items[i].Img, new Rectangle(cx, cy, 16 * scale, 16 * scale));
+                g.DrawString(items[i].Name, font, textBrush, cx, cy + 16 * scale + 2);
+            }
+        }
+
+        string path = Path.Combine(AppContext.BaseDirectory, "icons-preview.png");
+        bmp.Save(path, ImageFormat.Png);
+        Console.WriteLine("图标预览已生成：" + path);
     }
 
     public static void Run(bool selfTestPower)

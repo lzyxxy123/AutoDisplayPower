@@ -4,6 +4,19 @@ using System.Windows.Forms;
 
 namespace AutoDisplayPower.Utils;
 
+/// <summary>菜单项的角色标记（渲染器据此决定画法）。</summary>
+internal static class MenuTag
+{
+    /// <summary>三个模式项：用“整行浅色高亮”表示当前模式，不画勾。</summary>
+    public const string Mode = "mode";
+
+    /// <summary>开关项：右侧绘制滑动开关，不画勾。</summary>
+    public const string Switch = "switch";
+
+    /// <summary>电源策略行：刚发生变化时短暂强调。</summary>
+    public const string Emphasize = "emphasize";
+}
+
 /// <summary>现代浅色菜单配色表（Fluent 风格）。</summary>
 internal sealed class ModernColorTable : ProfessionalColorTable
 {
@@ -28,11 +41,16 @@ internal sealed class ModernColorTable : ProfessionalColorTable
 /// <summary>
 /// 现代风格菜单渲染器：
 /// 1) 浅色背景 + 淡蓝悬停 + 细边框/分隔线；
-/// 2) 只读（禁用）的状态行也能显示自定义颜色（默认渲染器会把禁用项一律画成灰）；
-/// 3) 对钩用矢量绘制，颜色跟随该项文字色。
+/// 2) 只读（禁用）状态行也显示自定义颜色，不再被画成灰色；
+/// 3) 模式项用“整行浅色药丸”表示当前模式（不画勾）；
+/// 4) 开关项在右侧绘制滑动开关（轨道 + 圆钮）；
+/// 5) 其余勾选项用矢量彩色对钩（颜色跟随文字色）。
 /// </summary>
 internal sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
 {
+    private const int SwitchWidth = 30;
+    private const int SwitchHeight = 15;
+
     public ModernMenuRenderer() : base(new ModernColorTable())
     {
         RoundedEdges = false;
@@ -42,7 +60,7 @@ internal sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
     {
         if (!e.Item.Enabled)
         {
-            // 让“只读状态行”保留自己的语义色，而不是被画成灰色
+            // 让“只读状态行”保留自己的颜色，而不是被默认渲染器画成灰色
             Font font = e.TextFont ?? e.Item.Font;
             TextRenderer.DrawText(e.Graphics, e.Text, font, e.TextRectangle, e.Item.ForeColor, e.TextFormat);
             return;
@@ -51,8 +69,41 @@ internal sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
         base.OnRenderItemText(e);
     }
 
+    protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+    {
+        string? tag = e.Item.Tag as string;
+        bool activeMode = tag == MenuTag.Mode && IsChecked(e.Item);
+        bool emphasize = tag == MenuTag.Emphasize;
+
+        if (activeMode || emphasize)
+        {
+            if (e.Item.Selected)
+            {
+                base.OnRenderMenuItemBackground(e);
+                DrawPill(e.Graphics, e.Item.Bounds, UiTheme.Hover);
+            }
+            else
+            {
+                DrawPill(e.Graphics, e.Item.Bounds, emphasize ? UiTheme.PillStrong : UiTheme.Pill);
+            }
+        }
+        else
+        {
+            base.OnRenderMenuItemBackground(e);
+        }
+
+        if (tag == MenuTag.Switch)
+            DrawSwitch(e.Graphics, e.Item.Bounds, IsChecked(e.Item));
+    }
+
+    private static bool IsChecked(ToolStripItem item) => item is ToolStripMenuItem m && m.Checked;
+
     protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
     {
+        string? tag = e.Item.Tag as string;
+        // 模式项用整行高亮表示、开关项用滑动开关表示 —— 都不画对钩
+        if (tag is MenuTag.Mode or MenuTag.Switch) return;
+
         Rectangle r = e.ImageRectangle;
         if (r.IsEmpty || r.Width < 4 || r.Height < 4)
         {
@@ -60,7 +111,7 @@ internal sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
             r = new Rectangle(c.Left + 2, c.Top + (c.Height - 14) / 2, 14, 14);
         }
 
-        var g = e.Graphics;
+        Graphics g = e.Graphics;
         SmoothingMode old = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         try
@@ -72,23 +123,78 @@ internal sealed class ModernMenuRenderer : ToolStripProfessionalRenderer
                 LineJoin = LineJoin.Round,
             };
 
-            float x0 = r.Left + r.Width * 0.12f;
-            float y0 = r.Top + r.Height * 0.52f;
-            float x1 = r.Left + r.Width * 0.40f;
-            float y1 = r.Bottom - r.Height * 0.20f;
-            float x2 = r.Right - r.Width * 0.06f;
-            float y2 = r.Top + r.Height * 0.20f;
-
             g.DrawLines(pen, new[]
             {
-                new PointF(x0, y0),
-                new PointF(x1, y1),
-                new PointF(x2, y2),
+                new PointF(r.Left + r.Width * 0.12f, r.Top + r.Height * 0.52f),
+                new PointF(r.Left + r.Width * 0.40f, r.Bottom - r.Height * 0.20f),
+                new PointF(r.Right - r.Width * 0.06f, r.Top + r.Height * 0.20f),
             });
         }
         finally
         {
             g.SmoothingMode = old;
         }
+    }
+
+    /// <summary>整行浅色药丸背景。</summary>
+    private static void DrawPill(Graphics g, Rectangle bounds, Color color)
+    {
+        var r = new Rectangle(bounds.Left + 3, bounds.Top + 1, bounds.Width - 6, bounds.Height - 2);
+        if (r.Width <= 0 || r.Height <= 0) return;
+
+        SmoothingMode old = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        try
+        {
+            using var path = Rounded(r, 5f);
+            using var brush = new SolidBrush(color);
+            g.FillPath(brush, path);
+        }
+        finally
+        {
+            g.SmoothingMode = old;
+        }
+    }
+
+    /// <summary>右侧滑动开关（轨道 + 圆钮）。</summary>
+    private static void DrawSwitch(Graphics g, Rectangle bounds, bool on)
+    {
+        var track = new Rectangle(
+            bounds.Right - SwitchWidth - 10,
+            bounds.Top + (bounds.Height - SwitchHeight) / 2,
+            SwitchWidth,
+            SwitchHeight);
+
+        SmoothingMode old = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        try
+        {
+            using (var path = Rounded(track, SwitchHeight / 2f))
+            using (var brush = new SolidBrush(on ? UiTheme.Accent : UiTheme.SwitchOff))
+            {
+                g.FillPath(brush, path);
+            }
+
+            int knob = SwitchHeight - 4;
+            int knobX = on ? track.Right - knob - 2 : track.Left + 2;
+            using var knobBrush = new SolidBrush(Color.White);
+            g.FillEllipse(knobBrush, knobX, track.Top + 2, knob, knob);
+        }
+        finally
+        {
+            g.SmoothingMode = old;
+        }
+    }
+
+    private static GraphicsPath Rounded(Rectangle r, float radius)
+    {
+        float d = radius * 2f;
+        var path = new GraphicsPath();
+        path.AddArc(r.Left, r.Top, d, d, 180f, 90f);
+        path.AddArc(r.Right - d, r.Top, d, d, 270f, 90f);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0f, 90f);
+        path.AddArc(r.Left, r.Bottom - d, d, d, 90f, 90f);
+        path.CloseFigure();
+        return path;
     }
 }
