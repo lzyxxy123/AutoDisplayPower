@@ -80,8 +80,11 @@ public static class CheckMode
         sb.AppendLine($"[期望策略] {policyText}  (LIDACTION = {(lid.HasValue ? lid.Value.ToString() : "不变")})");
 
         var (ac, dc, okQ) = PowerManager.QueryLidAction();
-        sb.AppendLine($"[当前实际] LIDACTION AC = {(ac >= 0 ? $"0x{ac:X}" : "未知")}，" +
-                      $"DC = {(dc >= 0 ? $"0x{dc:X}" : "未知")}（查询{(okQ ? "成功" : "失败")}）");
+        if (okQ)
+            sb.AppendLine($"[当前实际] LIDACTION AC = 0x{ac:X}，DC = 0x{dc:X}");
+        else
+            sb.AppendLine("[当前实际] 无法读取 LIDACTION（本机电源方案未提供合盖项，或当前会话无修改权限）；" +
+                          "程序仍会按状态管理策略，界面显示“期望策略（已下发/写入失败）”。");
 
         if (selfTestPower)
         {

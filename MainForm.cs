@@ -37,6 +37,7 @@ public sealed class MainForm : ApplicationContext
     private bool _eventPending;
     private bool _syncingStartup;
     private bool _suppressBalloons = true;          // 启动首次对齐时不弹气球，避免开机骚扰
+    private string? _lastApplyError;                // 上次下发失败信息（相同错误只记一次日志）
     private string _lastCore = string.Empty;
 
     public MainForm()
@@ -210,7 +211,11 @@ public sealed class MainForm : ApplicationContext
         {
             _lastApplyFailUtc = DateTime.UtcNow;
             _appliedLid = -2;
-            Logger.Error($"合盖策略下发失败：{err}");
+            if (_lastApplyError != err)
+            {
+                _lastApplyError = err;
+                Logger.Error($"合盖策略下发失败：{err}");
+            }
         }
     }
 
@@ -236,16 +241,30 @@ public sealed class MainForm : ApplicationContext
         _lastCore = core;
         _miScreens.Text = "  当前屏幕：" + screens;
         _miLid.Text = "  推断盖子状态：" + lid;
-        _miPolicy.Text = "  电源策略：" + QueryPolicyText();
+        _miPolicy.Text = "  电源策略：" + QueryPolicyText(snap);
     }
 
-    private string QueryPolicyText()
+    /// <summary>
+    /// 显示合盖电源策略：优先读电源方案真实值；
+    /// 读不到（本机方案无合盖项 / 当前会话无权限）时，显示本程序正在管理的策略并标注写入状态。
+    /// </summary>
+    private string QueryPolicyText(MonitorScanResult snap)
     {
         var (ac, dc, ok) = PowerManager.QueryLidAction();
-        if (!ok) return "查询失败";
-        return ac == dc
-            ? StateRules.DescribeLidValue(ac)
-            : $"AC {StateRules.DescribeLidValue(ac)} / DC {StateRules.DescribeLidValue(dc)}";
+        if (ok)
+        {
+            return ac == dc
+                ? StateRules.DescribeLidValue(ac)
+                : $"AC {StateRules.DescribeLidValue(ac)} / DC {StateRules.DescribeLidValue(dc)}";
+        }
+
+        var (expected, _) = StateRules.ExpectedPolicy(snap.State);
+        if (expected is null) return "未管理（屏幕状态未知）";
+
+        string policy = StateRules.DescribeLidValue(expected.Value);
+        if (_appliedLid == expected.Value) return policy + "（已下发）";
+        if (_appliedLid == -2) return policy + "（写入失败，需权限）";
+        return policy + "（待下发）";
     }
 
     // ---------------- 手动操作 ----------------
