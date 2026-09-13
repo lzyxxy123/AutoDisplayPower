@@ -72,31 +72,31 @@ public sealed class MainForm : ApplicationContext
 
         _miStatusTitle = new ToolStripMenuItem("状态")
         {
-            Enabled = false, ForeColor = UiTheme.TextPrimary, Font = _policyBoldFont, Image = MenuIconFactory.EmptyRow(),
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Font = _policyBoldFont, Image = MenuIconFactory.Blank(),
         };
         _miScreens = new ToolStripMenuItem("当前屏幕：—")
         {
-            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.ScreenRow(ScreenState.Unknown),
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.ScreenIcon(ScreenState.Unknown),
         };
         _miLid = new ToolStripMenuItem("盖子状态：—")
         {
-            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.LidRow(LidState.Unknown),
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.LidIcon(LidState.Unknown),
         };
         _miPolicy = new ToolStripMenuItem("电源策略：—")
         {
-            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.PolicyRow(null, false),
+            Enabled = false, ForeColor = UiTheme.TextPrimary, Image = MenuIconFactory.PolicyIcon(null, false),
         };
 
         // 三个模式项：当前模式由图片里的“对钩”表示（最可靠），文字另加粗
-        _miExternal = new ToolStripMenuItem("仅外接") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeRow(DisplaySwitcher.Mode.External, false) };
-        _miInternal = new ToolStripMenuItem("仅笔记本") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Internal, false) };
-        _miExtend = new ToolStripMenuItem("扩展") { Tag = MenuTag.Mode, Image = MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Extend, false) };
+        _miExternal = new ToolStripMenuItem("仅外接") { Tag = new MenuMark { Kind = MenuMarkKind.CheckRight }, Image = MenuIconFactory.ModeIcon(DisplaySwitcher.Mode.External) };
+        _miInternal = new ToolStripMenuItem("仅笔记本") { Tag = new MenuMark { Kind = MenuMarkKind.CheckRight }, Image = MenuIconFactory.ModeIcon(DisplaySwitcher.Mode.Internal) };
+        _miExtend = new ToolStripMenuItem("扩展") { Tag = new MenuMark { Kind = MenuMarkKind.CheckRight }, Image = MenuIconFactory.ModeIcon(DisplaySwitcher.Mode.Extend) };
 
         // “插上外接屏时”子菜单（三选一，选中项同样用对钩）
-        _miPlugExternal = new ToolStripMenuItem("始终「仅外接」") { Tag = MenuTag.Mode, Image = MenuIconFactory.SubRow("plug-ext", MenuIconFactory.ModeExternal()) };
-        _miPlugExtend = new ToolStripMenuItem("始终「扩展」") { Tag = MenuTag.Mode, Image = MenuIconFactory.SubRow("plug-2", MenuIconFactory.ModeExtend()) };
-        _miPlugRemember = new ToolStripMenuItem("记住上次选择") { Tag = MenuTag.Mode, Image = MenuIconFactory.SubRow("plug-last", MenuIconFactory.History()) };
-        _miPlugMenu = new ToolStripMenuItem("插上外接屏时") { Image = MenuIconFactory.SubRow("plug-menu", MenuIconFactory.PlugArrow()) };
+        _miPlugExternal = new ToolStripMenuItem("始终「仅外接」") { Tag = new MenuMark { Kind = MenuMarkKind.CheckRight }, Image = MenuIconFactory.ModeExternal() };
+        _miPlugExtend = new ToolStripMenuItem("始终「扩展」") { Tag = new MenuMark { Kind = MenuMarkKind.CheckRight }, Image = MenuIconFactory.ModeExtend() };
+        _miPlugRemember = new ToolStripMenuItem("记住上次选择") { Tag = new MenuMark { Kind = MenuMarkKind.CheckRight }, Image = MenuIconFactory.History() };
+        _miPlugMenu = new ToolStripMenuItem("插上外接屏时") { Image = MenuIconFactory.PlugArrow() };
         _miPlugMenu.DropDownItems.Add(_miPlugExternal);
         _miPlugMenu.DropDownItems.Add(_miPlugExtend);
         _miPlugMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -105,16 +105,16 @@ public sealed class MainForm : ApplicationContext
         // 开机自启动：右侧滑动开关
         _miStartup = new ToolStripMenuItem("开机自启动")
         {
-            CheckOnClick = true, Tag = MenuTag.Switch, Image = MenuIconFactory.SubRow("startup", MenuIconFactory.Power()),
+            CheckOnClick = true, Tag = new MenuMark { Kind = MenuMarkKind.Switch }, Image = MenuIconFactory.Power(),
         };
-        _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…") { Image = MenuIconFactory.SubRow("config", MenuIconFactory.Settings()) };
+        _miConfigDisplay = new ToolStripMenuItem("显示器型号配置…") { Image = MenuIconFactory.Settings() };
 
         // 界面主题子菜单（单选）
-        _miThemeMenu = new ToolStripMenuItem("界面主题") { Image = MenuIconFactory.SubRow("theme-menu", MenuIconFactory.Palette()) };
+        _miThemeMenu = new ToolStripMenuItem("界面主题") { Image = MenuIconFactory.Palette() };
         foreach (Theme theme in ThemeCatalog.All)
         {
             Theme captured = theme;
-            var item = new ToolStripMenuItem(theme.Name) { Tag = MenuTag.Mode };
+            var item = new ToolStripMenuItem(theme.Name) { Tag = new MenuMark { Kind = MenuMarkKind.CheckRight } };
             item.Click += (_, _) => ApplyTheme(captured.Key);
             _miThemeItems.Add(item);
             _miThemeMenu.DropDownItems.Add(item);
@@ -376,14 +376,14 @@ public sealed class MainForm : ApplicationContext
     {
         if (!snap.Ok) return;
 
-        // 三个模式项：当前模式 = 图片里的对钩 + 文字加粗（对钩直接合成进图片，显示最可靠）
+        // 三个模式项：当前模式由【右侧对钩】表示 + 文字加粗
         bool isExternal = snap.State == ScreenState.ExternalOnly;
         bool isInternal = snap.State == ScreenState.InternalOnly;
         bool isExtend = snap.State == ScreenState.Extended;
 
-        _miExternal.Image = MenuIconFactory.ModeRow(DisplaySwitcher.Mode.External, isExternal);
-        _miInternal.Image = MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Internal, isInternal);
-        _miExtend.Image = MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Extend, isExtend);
+        SetMarkActive(_miExternal, isExternal);
+        SetMarkActive(_miInternal, isInternal);
+        SetMarkActive(_miExtend, isExtend);
 
         _miExternal.Font = isExternal ? _policyBoldFont : null;
         _miInternal.Font = isInternal ? _policyBoldFont : null;
@@ -401,9 +401,9 @@ public sealed class MainForm : ApplicationContext
         var policy = PowerManager.QueryLidAction();
 
         // 状态行图标随状态变色（文字统一跟随主题，语义交给图标）
-        _miScreens.Image = MenuIconFactory.ScreenRow(snap.State);
-        _miLid.Image = MenuIconFactory.LidRow(snap.Lid);
-        _miPolicy.Image = MenuIconFactory.PolicyRow(ResolvePolicyIconValue(snap, policy), IsPolicyWriteFailed(policy));
+        _miScreens.Image = MenuIconFactory.ScreenIcon(snap.State);
+        _miLid.Image = MenuIconFactory.LidIcon(snap.Lid);
+        _miPolicy.Image = MenuIconFactory.PolicyIcon(ResolvePolicyIconValue(snap, policy), IsPolicyWriteFailed(policy));
 
         // 悬停托盘图标时显示的单行摘要（含 屏幕 / 盖子 / 电源策略）
         _tray.Text = BuildTrayTooltip(snap, policy);
@@ -442,7 +442,7 @@ public sealed class MainForm : ApplicationContext
         if (_suppressBalloons) return; // 启动首次对齐不强调
 
         _policyEmphasizing = true;
-        _miPolicy.Tag = MenuTag.Emphasize;
+        _miPolicy.Tag = new MenuMark { Kind = MenuMarkKind.Emphasize };
         _miPolicy.Font = _policyBoldFont;
         _emphasisTimer.Stop();
         _emphasisTimer.Start();
@@ -499,7 +499,13 @@ public sealed class MainForm : ApplicationContext
         Logger.Info($"插上外接屏时的行为已设为：{PlugPolicy.DescribeBehavior()}");
     }
 
-    /// <summary>刷新“插上外接屏时”子菜单的选中项（选中项用图片里的对钩 + 加粗）。</summary>
+    /// <summary>设置某个对钩项的选中状态（对钩画在右侧）。</summary>
+    private static void SetMarkActive(ToolStripItem item, bool active)
+    {
+        if (item.Tag is MenuMark mark) mark.Active = active;
+    }
+
+    /// <summary>刷新“插上外接屏时”子菜单的选中项（右侧对钩 + 加粗）。</summary>
     private void RefreshPlugMenu()
     {
         PlugBehavior behavior = PlugPolicy.Behavior;
@@ -507,9 +513,9 @@ public sealed class MainForm : ApplicationContext
         bool isExtend = behavior == PlugBehavior.FixedExtend;
         bool isLast = behavior == PlugBehavior.RememberLast;
 
-        _miPlugExternal.Image = MenuIconFactory.Row("plug-ext", MenuIconFactory.ModeExternal(), isExt);
-        _miPlugExtend.Image = MenuIconFactory.Row("plug-2", MenuIconFactory.ModeExtend(), isExtend);
-        _miPlugRemember.Image = MenuIconFactory.Row("plug-last", MenuIconFactory.History(), isLast);
+        SetMarkActive(_miPlugExternal, isExt);
+        SetMarkActive(_miPlugExtend, isExtend);
+        SetMarkActive(_miPlugRemember, isLast);
 
         _miPlugExternal.Font = isExt ? _policyBoldFont : null;
         _miPlugExtend.Font = isExtend ? _policyBoldFont : null;
@@ -567,23 +573,25 @@ public sealed class MainForm : ApplicationContext
     /// <summary>清缓存后按新配色重建各项图标。</summary>
     private void RebuildIcons()
     {
-        _miStatusTitle.Image = MenuIconFactory.EmptyRow();
-        _miPlugMenu.Image = MenuIconFactory.SubRow("plug-menu", MenuIconFactory.PlugArrow());
-        _miThemeMenu.Image = MenuIconFactory.SubRow("theme-menu", MenuIconFactory.Palette());
-        _miStartup.Image = MenuIconFactory.SubRow("startup", MenuIconFactory.Power());
-        _miConfigDisplay.Image = MenuIconFactory.SubRow("config", MenuIconFactory.Settings());
+        _miStatusTitle.Image = MenuIconFactory.Blank();
+        _miPlugMenu.Image = MenuIconFactory.PlugArrow();
+        _miThemeMenu.Image = MenuIconFactory.Palette();
+        _miStartup.Image = MenuIconFactory.Power();
+        _miConfigDisplay.Image = MenuIconFactory.Settings();
         // 状态行图标由 UpdateStatusFrom 按状态重设；模式/子菜单项由各自 Refresh 重设
     }
 
-    /// <summary>刷新主题子菜单的选中项（选中项用图片里的对钩 + 加粗）。</summary>
+    /// <summary>刷新主题子菜单的选中项（右侧对钩 + 加粗；左侧显示主题色块）。</summary>
     private void RefreshThemeMenu()
     {
         for (int i = 0; i < _miThemeItems.Count && i < ThemeCatalog.All.Count; i++)
         {
             Theme theme = ThemeCatalog.All[i];
             bool selected = theme.Key == UiTheme.CurrentKey;
-            _miThemeItems[i].Image = MenuIconFactory.Row($"theme-{theme.Key}", MenuIconFactory.Swatch(theme.Key, theme.Accent), selected);
+
+            _miThemeItems[i].Image = MenuIconFactory.Swatch(theme.Key, theme.Accent);
             _miThemeItems[i].Font = selected ? _policyBoldFont : null;
+            SetMarkActive(_miThemeItems[i], selected);
         }
     }
 

@@ -70,27 +70,16 @@ internal static class MenuIconFactory
     public static Image Palette() => Get("palette", g => DrawPalette(g, UiTheme.Accent));
     public static Image Blank() => Get("blank", _ => { });
 
-    // ---------------- 行图标：[对钩列][图标] 组合图 ----------------
-    // 把“选中对钩”直接合成进图片，避免依赖菜单渲染器的勾选区（更可靠、且勾与图标不会互相抢位）
+    // ---------------- 行图标 ----------------
+    // 说明：不再把对钩合成进图片（对钩改由渲染器画在【右侧】），这里只提供 16px 的纯图标，
+    // 所有行共用同一图标列宽，排版紧凑整齐。
 
-    /// <summary>模式行图标（active=true 时在左侧画出对钩）。</summary>
-    public static Image ModeRow(DisplaySwitcher.Mode mode, bool active)
-        => Row($"row-mode-{mode}-{active}", ModeIcon(mode), active);
-
-    public static Image ScreenRow(ScreenState state)
-        => Row($"row-screen-{state}", ScreenIcon(state), false);
-
-    public static Image LidRow(LidState lid)
-        => Row($"row-lid-{lid}", LidIcon(lid), false);
-
-    public static Image PolicyRow(int? value, bool failed)
-        => Row($"row-pol-{value}-{failed}", PolicyIcon(value, failed), false);
-
-    /// <summary>无图标的行（占位，保证缩进一致）。</summary>
-    public static Image EmptyRow() => Row("row-empty", Blank(), false);
-
-    /// <summary>子菜单行（自带图标，无对钩列）。</summary>
-    public static Image SubRow(string key, Image icon) => Row($"row-sub-{key}", icon, false);
+    public static Image ModeIcon(DisplaySwitcher.Mode mode) => mode switch
+    {
+        DisplaySwitcher.Mode.External => ModeExternal(),
+        DisplaySwitcher.Mode.Internal => ModeInternal(),
+        _ => ModeExtend(),
+    };
 
     /// <summary>主题色块（用于“界面主题”子菜单）。</summary>
     public static Image Swatch(string key, Color color)
@@ -109,53 +98,6 @@ internal static class MenuIconFactory
 
         Cache[cacheKey] = bmp;
         return bmp;
-    }
-
-    public static Image ModeIcon(DisplaySwitcher.Mode mode) => mode switch
-    {
-        DisplaySwitcher.Mode.External => ModeExternal(),
-        DisplaySwitcher.Mode.Internal => ModeInternal(),
-        _ => ModeExtend(),
-    };
-
-    /// <summary>组合出 [对钩列][图标] 的行图标（check=true 时左侧画对钩）。</summary>
-    public static Image Row(string key, Image icon, bool check)
-    {
-        string cacheKey = key + "@" + _size;
-        if (Cache.TryGetValue(cacheKey, out Image? cached)) return cached;
-
-        int h = _size;
-        int w = _size * 2; // 左列对钩 + 右列图标
-        var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
-            if (check) DrawCheck(g, new RectangleF(1f, h / 2f - h * 0.22f, h * 0.46f, h * 0.44f));
-            g.DrawImage(icon, new RectangleF(_size, 0, _size, _size));
-        }
-
-        Cache[cacheKey] = bmp;
-        return bmp;
-    }
-
-    /// <summary>矢量对钩（颜色用主题强调色）。</summary>
-    private static void DrawCheck(Graphics g, RectangleF r)
-    {
-        using var pen = new Pen(UiTheme.Accent, Math.Max(1.6f, _size * 0.14f))
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-            LineJoin = LineJoin.Round,
-        };
-        g.DrawLines(pen, new[]
-        {
-            new PointF(r.Left, r.Top + r.Height * 0.5f),
-            new PointF(r.Left + r.Width * 0.38f, r.Bottom),
-            new PointF(r.Right, r.Top),
-        });
     }
 
     // ---------------- 绘制实现（16×16 设计空间）----------------

@@ -127,34 +127,35 @@ public static class CheckMode
             ImageScalingSize = new Size(16, 16),
         };
 
-        System.Windows.Forms.ToolStripMenuItem Make(string text, Image? img, string? tag = null)
-            => new(text) { Enabled = tag is not null, ForeColor = UiTheme.TextPrimary, Image = img, ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None, Tag = tag };
+        System.Windows.Forms.ToolStripMenuItem Make(string text, Image? img, object? mark = null)
+            => new(text) { Enabled = mark is not null, ForeColor = UiTheme.TextPrimary, Image = img, ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None, Tag = mark };
 
-        menu.Items.Add(Make("状态", MenuIconFactory.EmptyRow()));
-        menu.Items.Add(Make("当前屏幕：外接屏 (KG257S PLUS)", MenuIconFactory.ScreenRow(ScreenState.ExternalOnly)));
-        menu.Items.Add(Make("盖子状态：打开", MenuIconFactory.LidRow(LidState.Open)));
-        menu.Items.Add(Make("电源策略：合盖不操作（已下发）", MenuIconFactory.PolicyRow(0, false)));
+        menu.Items.Add(Make("状态", MenuIconFactory.Blank()));
+        menu.Items.Add(Make("当前屏幕：外接屏 (KG257S PLUS)", MenuIconFactory.ScreenIcon(ScreenState.ExternalOnly)));
+        menu.Items.Add(Make("盖子状态：打开", MenuIconFactory.LidIcon(LidState.Open)));
+        menu.Items.Add(Make("电源策略：合盖不操作（已下发）", MenuIconFactory.PolicyIcon(0, false)));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
-        var miExternal = Make("仅外接", MenuIconFactory.ModeRow(DisplaySwitcher.Mode.External, true), MenuTag.Mode);
-        var miInternal = Make("仅笔记本", MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Internal, false), MenuTag.Mode);
-        var miExtend = Make("扩展", MenuIconFactory.ModeRow(DisplaySwitcher.Mode.Extend, false), MenuTag.Mode);
+        var miExternal = Make("仅外接", MenuIconFactory.ModeIcon(DisplaySwitcher.Mode.External), new MenuMark { Kind = MenuMarkKind.CheckRight, Active = true });
+        var miInternal = Make("仅笔记本", MenuIconFactory.ModeIcon(DisplaySwitcher.Mode.Internal), new MenuMark { Kind = MenuMarkKind.CheckRight });
+        var miExtend = Make("扩展", MenuIconFactory.ModeIcon(DisplaySwitcher.Mode.Extend), new MenuMark { Kind = MenuMarkKind.CheckRight });
+        miExternal.Font = new Font(menu.Font, FontStyle.Bold);
         menu.Items.Add(miExternal);
         menu.Items.Add(miInternal);
         menu.Items.Add(miExtend);
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
-        menu.Items.Add(Make("插上外接屏时", MenuIconFactory.Row("row-plug", MenuIconFactory.PlugArrow(), false)));
-        menu.Items.Add(Make("界面主题", MenuIconFactory.Row("row-palette", MenuIconFactory.Palette(), false)));
+        menu.Items.Add(Make("插上外接屏时", MenuIconFactory.PlugArrow()));
+        menu.Items.Add(Make("界面主题", MenuIconFactory.Palette()));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
-        var miStartup = Make("开机自启动", MenuIconFactory.Row("row-power", MenuIconFactory.Power(), false), MenuTag.Switch);
+        var miStartup = Make("开机自启动", MenuIconFactory.Power(), new MenuMark { Kind = MenuMarkKind.Switch });
         miStartup.CheckOnClick = true;
         miStartup.Checked = true;
         menu.Items.Add(miStartup);
-        menu.Items.Add(Make("显示器型号配置…", MenuIconFactory.Row("row-settings", MenuIconFactory.Settings(), false)));
+        menu.Items.Add(Make("显示器型号配置…", MenuIconFactory.Settings()));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add(Make("退出", MenuIconFactory.EmptyRow()));
+        menu.Items.Add(Make("退出", MenuIconFactory.Blank()));
 
         // 子菜单预览：界面主题（验证子菜单里的对钩）
         var sub = new System.Windows.Forms.ContextMenuStrip
@@ -171,8 +172,8 @@ public static class CheckMode
                 Enabled = true,
                 ForeColor = UiTheme.TextPrimary,
                 ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None,
-                Tag = MenuTag.Mode,
-                Image = MenuIconFactory.Row($"theme-{theme.Key}", MenuIconFactory.Swatch(theme.Key, theme.Accent), selected),
+                Tag = new MenuMark { Kind = MenuMarkKind.CheckRight, Active = selected },
+                Image = MenuIconFactory.Swatch(theme.Key, theme.Accent),
                 Font = selected ? new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) : null,
             };
             sub.Items.Add(item);
