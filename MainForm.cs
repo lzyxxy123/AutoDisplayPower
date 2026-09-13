@@ -38,6 +38,8 @@ public sealed class MainForm : ApplicationContext
     private bool _syncingStartup;
     private bool _suppressBalloons = true;          // 启动首次对齐时不弹气球，避免开机骚扰
     private string? _lastApplyError;                // 上次下发失败信息（相同错误只记一次日志）
+    private DisplaySwitcher.Mode? _pendingSwitchMode; // 待汇总通知：本次切换到的显示模式
+    private int? _pendingPolicyValue;                 // 待汇总通知：本次下发的合盖策略
     private string _lastCore = string.Empty;
 
     public MainForm()
@@ -153,6 +155,7 @@ public sealed class MainForm : ApplicationContext
 
             AlignPolicy(snap);
             UpdateStatusFrom(snap);
+            NotifyPendingChanges(snap);
         }
         catch (Exception ex)
         {
@@ -171,8 +174,7 @@ public sealed class MainForm : ApplicationContext
         {
             string action = mode == DisplaySwitcher.Mode.External ? "接入外接屏" : "拔掉外接屏";
             Logger.Info($"{action} → 自动切换：{DisplaySwitcher.ModeText(mode)}");
-            if (!_suppressBalloons)
-                TryBalloon($"{action}，已自动切换：{DisplaySwitcher.ModeText(mode)}");
+            _pendingSwitchMode = mode; // 不单独弹通知，汇总到本轮检测末尾统一弹一条
         }
         else
         {
@@ -204,8 +206,7 @@ public sealed class MainForm : ApplicationContext
         {
             _appliedLid = target;
             Logger.Info($"状态 {snap.State} → 已下发合盖策略：{StateRules.DescribeLidValue(target)}");
-            if (!_suppressBalloons)
-                TryBalloon($"显示器状态已变化，合盖电源策略已更新为：{StateRules.DescribeLidValue(target)}");
+            _pendingPolicyValue = target; // 不单独弹通知，汇总到本轮检测末尾统一弹一条
         }
         else
         {
@@ -287,13 +288,53 @@ public sealed class MainForm : ApplicationContext
         }
     }
 
+    /// <summary>
+    /// 把本次检测中发生的“显示切换”和“电源策略更新”汇总成【一条】气泡通知，
+    /// 例如：已切换为仅笔记本屏幕，电源策略为合盖睡眠。
+    /// </summary>
+    private void NotifyPendingChanges(MonitorScanResult snap)
+    {
+        if (_pendingSwitchMode is null && _pendingPolicyValue is null) return;
+
+        if (_suppressBalloons)
+        {
+            // 启动首次对齐不打扰用户
+            _pendingSwitchMode = null;
+            _pendingPolicyValue = null;
+            return;
+        }
+
+        // 策略部分：优先用本次实际下发的值；若只是切换了屏幕而策略未变，则用当前状态对应的策略
+        int? policyValue = _pendingPolicyValue;
+        if (policyValue is null && _pendingSwitchMode is not null)
+            policyValue = StateRules.ExpectedPolicy(snap.State).LidAction;
+
+        string? switchPart = _pendingSwitchMode is { } m ? $"已切换为{ModeShortText(m)}屏幕" : null;
+        string? policyPart = policyValue is { } p ? $"电源策略为{StateRules.DescribeLidValue(p)}" : null;
+
+        string text = switchPart is not null && policyPart is not null
+            ? $"{switchPart}，{policyPart}"
+            : switchPart ?? policyPart!;
+
+        _pendingSwitchMode = null;
+        _pendingPolicyValue = null;
+        TryBalloon(text);
+    }
+
+    private static string ModeShortText(DisplaySwitcher.Mode mode) => mode switch
+    {
+        DisplaySwitcher.Mode.External => "仅外接",
+        DisplaySwitcher.Mode.Internal => "仅笔记本",
+        _ => "扩展",
+    };
+
     private void ManualSwitch(DisplaySwitcher.Mode mode)
     {
         if (DisplaySwitcher.Switch(mode, out string? err))
         {
             Logger.Info($"手动切换：{DisplaySwitcher.ModeText(mode)}");
-            TryBalloon($"已切换：{DisplaySwitcher.ModeText(mode)}");
-            _lastCore = string.Empty; // 稍后事件/轮询会刷新状态与策略
+            _pendingSwitchMode = mode; // 汇总为一条通知（随后的事件/轮询会补上策略部分）
+            _lastCore = string.Empty;
         }
         else
         {
