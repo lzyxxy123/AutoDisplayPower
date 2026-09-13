@@ -38,6 +38,9 @@
 /publish/
 /publish-small/
 
+# 盖子检测对比测试的输出文件
+lidtest-*.txt
+
 # Windows 系统隐藏文件
 Thumbs.db
 Desktop.ini
